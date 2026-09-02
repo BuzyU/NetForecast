@@ -1,0 +1,37 @@
+# Virtual environments
+venv/
+.venv/
+backend/venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pytest_cache/
+.coverage
+htmlcov/
+
+# Node / Frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+.vite/
+
+# Database & Runtime Data
+backend/data/*.db
+backend/data/*.sqlite3
+*.db
+*.sqlite3
+
+# Logs & System
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Raw dataset downloads (keep benchmark_comparison.csv)
+data/raw/
+data/*.pcap
+data/*.pcapng
