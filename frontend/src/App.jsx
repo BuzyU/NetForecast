@@ -6,25 +6,38 @@ import {
 import {
   Activity, AlertTriangle, Shield, Upload, Radio,
   Eye, ChevronRight, Check, MonitorDot, Database,
-  FileText, Zap,
+  FileText, Zap, Settings, BarChart3, Terminal,
+  Cpu, Clock, Wifi,
 } from 'lucide-react';
 import { apiFetch, apiPost, apiUpload, createWebSocket } from './api';
-import { stageClass, stageColor, severityClass, formatTime, formatProb } from './utils';
+import {
+  stageClass, stageColor, stageIndex, severityClass,
+  formatTime, formatDateTime, formatProb, formatDuration, STAGES,
+} from './utils';
 import './index.css';
 
 // ═══════════════════════════════════════════════════════════════
-// APP
+// APP SHELL
 // ═══════════════════════════════════════════════════════════════
 export default function App() {
   const [view, setView] = useState('dashboard');
   const [health, setHealth] = useState(null);
   const [alertCount, setAlertCount] = useState(0);
   const [selectedSession, setSelectedSession] = useState(null);
+  const [clock, setClock] = useState(new Date());
 
+  // Live clock
+  useEffect(() => {
+    const t = setInterval(() => setClock(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Health + alert polling
   useEffect(() => {
     apiFetch('/health').then(setHealth).catch(() => setHealth({ status: 'offline' }));
     apiFetch('/alerts/stats').then(s => setAlertCount(s.unacknowledged || 0)).catch(() => {});
     const iv = setInterval(() => {
+      apiFetch('/health').then(setHealth).catch(() => setHealth({ status: 'offline' }));
       apiFetch('/alerts/stats').then(s => setAlertCount(s.unacknowledged || 0)).catch(() => {});
     }, 5000);
     return () => clearInterval(iv);
@@ -35,71 +48,186 @@ export default function App() {
     setView('forecast');
   };
 
+  const viewLabels = {
+    dashboard: 'DASHBOARD',
+    live_logs: 'LIVE_LOGS',
+    alerts: 'ALERTS',
+    forecast: 'FORECAST',
+    explain: 'EXPLAINABILITY',
+    reports: 'REPORTS',
+    ingest: 'INGEST',
+    settings: 'SETTINGS',
+  };
+
+  const systemStatus = health?.status === 'ok' ? 'nominal' : health?.status === 'offline' ? 'offline' : 'degraded';
+
   return (
     <div className="app-layout">
-      {/* Sidebar */}
+      {/* ── Sidebar ── */}
       <nav className="sidebar">
         <div className="sidebar-brand">
           <h1>NetForecast</h1>
-          <span>MITRE ATT&CK Forecasting</span>
+          <span>MITRE ATT&CK Forecasting Engine</span>
         </div>
+
         <div className="nav-section">
-          <div className="nav-label">Monitor</div>
+          <div className="nav-label">// SYSTEM_MODULES</div>
           <button className={`nav-item ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}>
-            <MonitorDot size={16}/> Dashboard
+            <MonitorDot size={15}/> DASHBOARD
           </button>
-          <button className={`nav-item ${view === 'forecast' ? 'active' : ''}`} onClick={() => setView('forecast')}>
-            <Activity size={16}/> Forecast
+          <button className={`nav-item ${view === 'live_logs' ? 'active' : ''}`} onClick={() => setView('live_logs')}>
+            <Terminal size={15}/> LIVE_LOGS
+            <span className="nav-live-dot"/>
           </button>
           <button className={`nav-item ${view === 'alerts' ? 'active' : ''}`} onClick={() => setView('alerts')}>
-            <AlertTriangle size={16}/> Alerts
+            <AlertTriangle size={15}/> ALERTS
             {alertCount > 0 && <span className="nav-badge">{alertCount}</span>}
           </button>
-        </div>
-        <div className="nav-section">
-          <div className="nav-label">Data</div>
-          <button className={`nav-item ${view === 'ingest' ? 'active' : ''}`} onClick={() => setView('ingest')}>
-            <Upload size={16}/> Ingest
+          <button className={`nav-item ${view === 'forecast' ? 'active' : ''}`} onClick={() => setView('forecast')}>
+            <Activity size={15}/> FORECAST
           </button>
+        </div>
+
+        <div className="nav-section">
+          <div className="nav-label">// ANALYSIS</div>
+          <button className={`nav-item ${view === 'explain' ? 'active' : ''}`} onClick={() => setView('explain')}>
+            <Eye size={15}/> EXPLAINABILITY
+          </button>
+          <button className={`nav-item ${view === 'reports' ? 'active' : ''}`} onClick={() => setView('reports')}>
+            <BarChart3 size={15}/> REPORTS
+          </button>
+        </div>
+
+        <div className="nav-section">
+          <div className="nav-label">// DATA</div>
+          <button className={`nav-item ${view === 'ingest' ? 'active' : ''}`} onClick={() => setView('ingest')}>
+            <Upload size={15}/> INGEST
+          </button>
+          <button className={`nav-item ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}>
+            <Settings size={15}/> SETTINGS
+          </button>
+        </div>
+
+        <div className="sidebar-status">
+          <div className="sidebar-status-label">// STATUS</div>
+          <div className={`sidebar-status-value ${systemStatus}`}>
+            <span className="status-block">&#9632;</span>
+            {systemStatus === 'nominal' ? 'SYSTEM NOMINAL' : systemStatus === 'degraded' ? 'DEGRADED' : 'OFFLINE'}
+          </div>
         </div>
       </nav>
 
-      {/* Header */}
+      {/* ── Header / Command Bar ── */}
       <header className="header">
-        <span className="header-title">Network Attack Forecasting System</span>
-        <div className="header-status">
-          <div className={`status-dot ${health?.status === 'ok' ? '' : health?.status === 'degraded' ? 'degraded' : 'offline'}`}/>
-          <span className="status-label">
-            {health?.model_loaded ? `Model loaded · ${health.device}` : 'Connecting...'}
+        <span className="header-breadcrumb">
+          SYS_VIEW // <span className="view-name">[{viewLabels[view] || view.toUpperCase()}]</span>
+        </span>
+        <div className="header-right">
+          <div className="header-indicator">
+            <span className={`dot ${systemStatus === 'nominal' ? '' : systemStatus}`}/>
+            {health?.model_loaded ? `MODEL: ${health.device?.toUpperCase() || 'CPU'}` : 'MODEL: LOADING'}
+          </div>
+          <div className="header-indicator">
+            <Wifi size={10}/>
+            {alertCount > 0 ? `ALERTS: ${alertCount}` : 'ALERTS: 0'}
+          </div>
+          <span className="header-clock">
+            {clock.toISOString().slice(0, 19).replace('T', ' ')} UTC
           </span>
         </div>
       </header>
 
-      {/* Main */}
+      {/* ── Main ── */}
       <main className="main-content">
         {view === 'dashboard' && <Dashboard onSelectSession={onSelectSession}/>}
-        {view === 'forecast' && <ForecastView session={selectedSession}/>}
+        {view === 'forecast' && <ForecastView session={selectedSession} onBack={() => setView('dashboard')}/>}
         {view === 'alerts' && <AlertsView/>}
+        {view === 'live_logs' && <LiveLogsView/>}
+        {view === 'explain' && <ExplainView/>}
+        {view === 'reports' && <ReportsView/>}
         {view === 'ingest' && <IngestPanel/>}
+        {view === 'settings' && <SettingsView health={health}/>}
       </main>
+
+      {/* ── Footer ── */}
+      <footer className="footer">
+        <span>NetForecast v1.0 // SIH 2026 PS26153</span>
+        <span>LSTM World Model // {health?.features_count || 22} Features // Window={health?.stages?.length || 6}</span>
+      </footer>
     </div>
   );
 }
 
+
 // ═══════════════════════════════════════════════════════════════
-// DASHBOARD — sessions table + stats
+// KILL CHAIN — visual MITRE ATT&CK stage progress
+// ═══════════════════════════════════════════════════════════════
+function KillChain({ currentStage, forecastStages = [] }) {
+  const currentIdx = stageIndex(currentStage);
+  const forecastIdxSet = new Set(forecastStages.map(s => stageIndex(s)));
+
+  return (
+    <div className="kill-chain">
+      {STAGES.map((stage, i) => {
+        let dotClass = '';
+        if (i < currentIdx) dotClass = 'passed';
+        else if (i === currentIdx) dotClass = 'current';
+        else if (forecastIdxSet.has(i)) dotClass = 'forecast';
+
+        let connClass = '';
+        if (i < currentIdx) connClass = 'passed';
+        else if (i >= currentIdx && forecastIdxSet.has(i)) connClass = 'forecast';
+
+        return (
+          <div key={stage} className="kill-chain-node" style={{ flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+              {i > 0 && <div className={`kill-chain-connector ${connClass}`} style={{ flex: 1 }}/>}
+              <div className={`kill-chain-dot ${dotClass}`}/>
+              {i < STAGES.length - 1 && <div className={`kill-chain-connector ${i < currentIdx ? 'passed' : i === currentIdx && forecastIdxSet.size > 0 ? 'forecast' : ''}`} style={{ flex: 1 }}/>}
+            </div>
+            <span className="kill-chain-label">{stage}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function KillChainCompact({ currentStage }) {
+  const currentIdx = stageIndex(currentStage);
+  return (
+    <div className="kill-chain-compact">
+      {STAGES.map((_, i) => (
+        <span key={i}>
+          <span className={`kc-dot ${i < currentIdx ? 'passed' : i === currentIdx ? 'current' : ''}`}/>
+          {i < STAGES.length - 1 && <span className={`kc-connector ${i < currentIdx ? 'passed' : ''}`}/>}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// DASHBOARD — stats + sessions table with kill chain
 // ═══════════════════════════════════════════════════════════════
 function Dashboard({ onSelectSession }) {
   const [sessions, setSessions] = useState([]);
   const [stats, setStats] = useState({});
+  const [alertStats, setAlertStats] = useState({});
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(() => {
     Promise.all([
       apiFetch('/sessions?limit=100'),
       apiFetch('/dashboard/stats'),
-    ]).then(([s, st]) => { setSessions(s); setStats(st); setLoading(false); })
-      .catch(() => setLoading(false));
+      apiFetch('/alerts/stats'),
+    ]).then(([s, st, as]) => {
+      setSessions(s);
+      setStats(st);
+      setAlertStats(as);
+      setLoading(false);
+    }).catch(() => setLoading(false));
   }, []);
 
   useEffect(() => {
@@ -110,63 +238,69 @@ function Dashboard({ onSelectSession }) {
 
   return (
     <>
-      {/* Stats bar */}
+      {/* Stats cards */}
       <div className="stats-bar">
-        <div className="stat-item">
-          <span className="stat-value">{stats.total_sessions || 0}</span>
-          <span className="stat-label">Sessions</span>
+        <div className="stat-card">
+          <div className="stat-card-label">TOTAL_SESSIONS</div>
+          <div className="stat-card-value">{stats.total_sessions || 0}</div>
         </div>
-        <div className="stat-item">
-          <span className="stat-value">{stats.total_flows || 0}</span>
-          <span className="stat-label">Flows ingested</span>
+        <div className="stat-card">
+          <div className="stat-card-label">FLOWS_INGESTED</div>
+          <div className="stat-card-value">{stats.total_flows || 0}</div>
         </div>
-        <div className="stat-item">
-          <span className="stat-value" style={{color: stats.at_risk_sessions > 0 ? 'var(--severity-critical)' : undefined}}>
+        <div className="stat-card">
+          <div className="stat-card-label">AT_RISK</div>
+          <div className="stat-card-value" style={{ color: (stats.at_risk_sessions || 0) > 0 ? 'var(--severity-critical)' : undefined }}>
             {stats.at_risk_sessions || 0}
-          </span>
-          <span className="stat-label">At risk</span>
+          </div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-card-label">UNACK_ALERTS</div>
+          <div className="stat-card-value" style={{ color: (alertStats.unacknowledged || 0) > 0 ? 'var(--severity-high)' : undefined }}>
+            {alertStats.unacknowledged || 0}
+          </div>
         </div>
       </div>
 
       {/* Sessions table */}
-      <div className="data-table-container">
+      <div className="data-table-wrap">
         {loading ? (
           <div className="empty-state"><div className="loading-spinner"/><p>Loading sessions...</p></div>
         ) : sessions.length === 0 ? (
           <div className="empty-state">
-            <Database size={32}/>
-            <p>No sessions yet. Ingest flow data or run the live capture pipeline.</p>
+            <Database size={28} color="var(--text-muted)"/>
+            <p>No sessions yet. Ingest flow data or run the traffic simulator.</p>
           </div>
         ) : (
           <table className="data-table">
             <thead>
               <tr>
-                <th>Session</th>
-                <th>Source IP</th>
-                <th>Destination IP</th>
-                <th>Flows</th>
-                <th>Risk Score</th>
-                <th>Latest Stage</th>
-                <th>Last Seen</th>
+                <th>SRC_IP</th>
+                <th>DST_IP</th>
+                <th>FLOWS</th>
+                <th>RISK</th>
+                <th>STAGE</th>
+                <th>KILL_CHAIN</th>
+                <th>LAST_SEEN</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
               {sessions.map(s => (
                 <tr key={s.session_key} onClick={() => onSelectSession(s)}>
-                  <td className="mono">{s.session_key.substring(0, 28)}</td>
-                  <td className="mono">{s.src_ip || '—'}</td>
-                  <td className="mono">{s.dst_ip || '—'}</td>
-                  <td className="mono">{s.flow_count}</td>
+                  <td>{s.src_ip || '\u2014'}</td>
+                  <td>{s.dst_ip || '\u2014'}</td>
+                  <td>{s.flow_count}</td>
                   <td>
                     <div className="risk-cell">
-                      <div className={`risk-indicator ${severityClass(s.latest_risk_score)}`}/>
-                      <span className="mono">{formatProb(s.latest_risk_score)}</span>
+                      <div className={`risk-bar ${severityClass(s.latest_risk_score)}`}/>
+                      <span>{formatProb(s.latest_risk_score)}</span>
                     </div>
                   </td>
                   <td><span className={`stage-badge ${stageClass(s.latest_stage)}`}>{s.latest_stage}</span></td>
-                  <td className="mono">{formatTime(s.last_seen)}</td>
-                  <td><ChevronRight size={14} color="var(--text-muted)"/></td>
+                  <td><KillChainCompact currentStage={s.latest_stage}/></td>
+                  <td>{formatTime(s.last_seen)}</td>
+                  <td><ChevronRight size={13} color="var(--text-muted)"/></td>
                 </tr>
               ))}
             </tbody>
@@ -177,12 +311,14 @@ function Dashboard({ onSelectSession }) {
   );
 }
 
+
 // ═══════════════════════════════════════════════════════════════
-// FORECAST VIEW — rollout chart + SHAP + MITRE timeline
+// FORECAST VIEW — kill chain + rollout chart + SHAP + flow logs
 // ═══════════════════════════════════════════════════════════════
-function ForecastView({ session }) {
+function ForecastView({ session, onBack }) {
   const [forecast, setForecast] = useState(null);
   const [explanation, setExplanation] = useState(null);
+  const [flows, setFlows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -191,18 +327,15 @@ function ForecastView({ session }) {
     setLoading(true);
     setError(null);
 
-    // Fetch the latest flows for this session to build a window
-    apiFetch(`/sessions/${encodeURIComponent(session.session_key)}/flows?limit=6`)
-      .then(flows => {
-        if (flows.length < 6) {
-          setError(`Need at least 6 flows for forecast, have ${flows.length}`);
+    apiFetch(`/sessions/${encodeURIComponent(session.session_key)}/flows?limit=100`)
+      .then(allFlows => {
+        setFlows(allFlows);
+        if (allFlows.length < 6) {
+          setError(`Need at least 6 flows for forecast, have ${allFlows.length}`);
           setLoading(false);
           return;
         }
-        // Build the window from the latest 6 flows' features
-        // The features are stored raw in the DB, we need to send scaled values
-        // For now, use the feature values directly — the backend handles scaling
-        const window = flows.slice(0, 6).reverse().map(f => {
+        const window = allFlows.slice(0, 6).reverse().map(f => {
           const feats = f.features;
           return [
             feats.flow_duration, feats.tot_fwd_pkts, feats.tot_bwd_pkts,
@@ -234,21 +367,20 @@ function ForecastView({ session }) {
   if (!session) {
     return (
       <div className="empty-state">
-        <Activity size={32}/>
-        <p>Select a session from the Dashboard to view its forecast.</p>
+        <Activity size={28} color="var(--text-muted)"/>
+        <p>Select a session from the Dashboard to view its attack forecast.</p>
       </div>
     );
   }
 
   if (loading) {
-    return <div className="empty-state"><div className="loading-spinner"/><p>Running forecast...</p></div>;
+    return <div className="empty-state"><div className="loading-spinner"/><p>Running forecast model...</p></div>;
   }
 
   if (error) {
-    return <div className="empty-state"><AlertTriangle size={32} color="var(--severity-high)"/><p>{error}</p></div>;
+    return <div className="empty-state"><AlertTriangle size={28} color="var(--severity-high)"/><p>{error}</p></div>;
   }
 
-  // Prepare chart data
   const chartData = forecast?.steps?.map(s => ({
     step: `+${s.step}`,
     mean: s.infiltration_prob_mean,
@@ -258,57 +390,66 @@ function ForecastView({ session }) {
     stage: s.predicted_stage,
   })) || [];
 
-  const maxImportance = explanation?.attributions ?
-    Math.max(...explanation.attributions.map(a => Math.abs(a.importance))) : 1;
+  const forecastStages = [...new Set(chartData.map(d => d.stage))];
+  const maxImportance = explanation?.attributions
+    ? Math.max(...explanation.attributions.map(a => Math.abs(a.importance)))
+    : 1;
 
   return (
     <>
-      <div style={{marginBottom: 'var(--sp-4)', display: 'flex', alignItems: 'baseline', gap: 'var(--sp-3)'}}>
-        <span className="mono" style={{color: 'var(--text-secondary)', fontSize: '0.75rem'}}>
-          {session.src_ip} → {session.dst_ip}
+      {/* Session header + back button */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', marginBottom: 'var(--sp-3)' }}>
+        <button className="btn btn-sm" onClick={onBack}>&larr; BACK</button>
+        <span className="mono text-sm" style={{ color: 'var(--text-secondary)' }}>
+          {session.src_ip} &rarr; {session.dst_ip}
         </span>
         <span className={`stage-badge ${stageClass(session.latest_stage)}`}>{session.latest_stage}</span>
         {forecast?.alert_triggered && (
-          <span className="severity-badge critical">Alert at step +{forecast.alert_at_step}</span>
+          <span className="severity-badge critical">ALERT AT STEP +{forecast.alert_at_step}</span>
         )}
       </div>
 
-      <div className="forecast-layout">
-        {/* ── Rollout Chart (hero) ── */}
+      {/* Kill Chain — full width hero */}
+      <div className="panel mb-4">
+        <div className="panel-header">
+          <span className="panel-title">KILL_CHAIN_PROGRESS</span>
+          <span className="panel-meta">MITRE ATT&CK Stage Tracker</span>
+        </div>
+        <div className="panel-body">
+          <KillChain currentStage={session.latest_stage} forecastStages={forecastStages}/>
+        </div>
+      </div>
+
+      {/* Forecast chart + SHAP side by side */}
+      <div className="forecast-grid">
         <div className="panel">
           <div className="panel-header">
-            <span className="panel-title">K-Step Infiltration Forecast</span>
-            <span className="mono" style={{fontSize: '0.7rem', color: 'var(--text-muted)'}}>
-              MC n=20 · EMA α=0.4
-            </span>
+            <span className="panel-title">K_STEP_FORECAST</span>
+            <span className="panel-meta">MC n=20 &middot; EMA &alpha;=0.4</span>
           </div>
           <div className="panel-body chart-container">
-            <ResponsiveContainer width="100%" height={280}>
-              <AreaChart data={chartData} margin={{top: 10, right: 20, bottom: 5, left: 10}}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#21262d"/>
-                <XAxis dataKey="step" tick={{fontSize: 11}}/>
-                <YAxis domain={[0, 1]} ticks={[0, 0.25, 0.5, 0.75, 1.0]} tick={{fontSize: 11}}/>
+            <ResponsiveContainer width="100%" height={260}>
+              <AreaChart data={chartData} margin={{ top: 10, right: 20, bottom: 5, left: 10 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#d4c5b0"/>
+                <XAxis dataKey="step" tick={{ fontSize: 11 }}/>
+                <YAxis domain={[0, 1]} ticks={[0, 0.25, 0.5, 0.75, 1.0]} tick={{ fontSize: 11 }}/>
                 <Tooltip
-                  contentStyle={{background: '#161b22', border: '1px solid #2d333b', borderRadius: 4, fontSize: 12}}
-                  labelStyle={{color: '#8b949e'}}
+                  contentStyle={{ background: '#fffbf5', border: '1px solid #d4c5b0', borderRadius: 3, fontSize: 12 }}
+                  labelStyle={{ color: '#5a5245' }}
                 />
-                {/* Uncertainty band */}
-                <Area type="monotone" dataKey="upper" stroke="none" fill="#2f81f7" fillOpacity={0.1} stackId="band"/>
-                <Area type="monotone" dataKey="lower" stroke="none" fill="#0f1117" fillOpacity={1} stackId="band"/>
-                {/* MC mean */}
-                <Area type="monotone" dataKey="mean" stroke="#2f81f7" strokeWidth={2} fill="none" name="MC Mean"/>
-                {/* EMA */}
-                <Area type="monotone" dataKey="ema" stroke="#8b949e" strokeWidth={1.5} strokeDasharray="4 3" fill="none" name="EMA"/>
-                {/* Decision threshold */}
-                <ReferenceLine y={forecast?.threshold || 0.5} stroke="#da3633" strokeDasharray="6 4" strokeWidth={1}
-                  label={{value: 'Threshold', position: 'right', fill: '#da3633', fontSize: 10}}/>
+                <Area type="monotone" dataKey="upper" stroke="none" fill="#e67e22" fillOpacity={0.08} stackId="band"/>
+                <Area type="monotone" dataKey="lower" stroke="none" fill="#f5efe6" fillOpacity={1} stackId="band"/>
+                <Area type="monotone" dataKey="mean" stroke="#e67e22" strokeWidth={2} fill="none" name="MC Mean"/>
+                <Area type="monotone" dataKey="ema" stroke="#8a7f72" strokeWidth={1.5} strokeDasharray="4 3" fill="none" name="EMA"/>
+                <ReferenceLine y={forecast?.threshold || 0.5} stroke="#c0392b" strokeDasharray="6 4" strokeWidth={1}
+                  label={{ value: 'Threshold', position: 'right', fill: '#c0392b', fontSize: 10 }}/>
               </AreaChart>
             </ResponsiveContainer>
 
-            {/* MITRE stage track */}
+            {/* Stage track below chart */}
             <div className="stage-track">
               {chartData.map((d, i) => (
-                <div key={i} className="stage-track-item" style={{background: stageColor(d.stage) + '20', color: stageColor(d.stage)}}>
+                <div key={i} className="stage-track-item" style={{ background: stageColor(d.stage) + '18', color: stageColor(d.stage) }}>
                   {d.stage}
                 </div>
               ))}
@@ -316,25 +457,21 @@ function ForecastView({ session }) {
           </div>
         </div>
 
-        {/* ── SHAP Panel ── */}
+        {/* SHAP panel */}
         <div className="panel">
           <div className="panel-header">
-            <span className="panel-title">Feature Attribution</span>
-            <span className="mono" style={{fontSize: '0.7rem', color: 'var(--text-muted)'}}>
-              Gradient × Input
-            </span>
+            <span className="panel-title">FEATURE_ATTRIBUTION</span>
+            <span className="panel-meta">Gradient &times; Input</span>
           </div>
           <div className="panel-body">
             {explanation && (
               <>
-                <div style={{marginBottom: 'var(--sp-4)', display: 'flex', gap: 'var(--sp-4)'}}>
-                  <div className="stat-item">
-                    <span className="stat-value" style={{fontSize: '1rem'}}>{formatProb(explanation.infiltration_probability)}</span>
-                    <span className="stat-label">P(infil)</span>
+                <div style={{ marginBottom: 'var(--sp-3)', display: 'flex', gap: 'var(--sp-4)', alignItems: 'baseline' }}>
+                  <div>
+                    <span className="mono" style={{ fontSize: '1.1rem', fontWeight: 700 }}>{formatProb(explanation.infiltration_probability)}</span>
+                    <span className="text-sm text-muted" style={{ marginLeft: 'var(--sp-2)' }}>P(INFIL)</span>
                   </div>
-                  <div className="stat-item">
-                    <span className={`stage-badge ${stageClass(explanation.predicted_stage)}`}>{explanation.predicted_stage}</span>
-                  </div>
+                  <span className={`stage-badge ${stageClass(explanation.predicted_stage)}`}>{explanation.predicted_stage}</span>
                 </div>
                 <div className="shap-bar-container">
                   {explanation.attributions.map((attr, i) => (
@@ -343,25 +480,165 @@ function ForecastView({ session }) {
                       <div className="shap-bar-track">
                         <div
                           className={`shap-bar ${attr.direction}`}
-                          style={{width: `${(Math.abs(attr.importance) / maxImportance) * 100}%`}}
+                          style={{ width: `${(Math.abs(attr.importance) / maxImportance) * 100}%` }}
                         />
                       </div>
                       <span className="shap-value">{attr.importance > 0 ? '+' : ''}{attr.importance.toFixed(4)}</span>
                     </div>
                   ))}
                 </div>
-                <div style={{marginTop: 'var(--sp-3)', display: 'flex', gap: 'var(--sp-4)', fontSize: '0.7rem', color: 'var(--text-muted)'}}>
-                  <span style={{color: 'var(--severity-critical)'}}>■ pushes → malicious</span>
-                  <span style={{color: 'var(--accent)'}}>■ pushes → benign</span>
+                <div style={{ marginTop: 'var(--sp-3)', display: 'flex', gap: 'var(--sp-4)', fontSize: '0.62rem' }}>
+                  <span style={{ color: 'var(--severity-critical)' }}>&#9632; MALICIOUS</span>
+                  <span style={{ color: 'var(--severity-low)' }}>&#9632; BENIGN</span>
                 </div>
               </>
             )}
           </div>
         </div>
       </div>
+
+      {/* ── Flow Logs Table ── */}
+      <div className="panel">
+        <div className="panel-header">
+          <span className="panel-title">NETWORK_LOGS</span>
+          <span className="panel-meta">{flows.length} flow records</span>
+        </div>
+        <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+          {flows.length === 0 ? (
+            <div className="empty-state"><p>No flow records.</p></div>
+          ) : (
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>TIMESTAMP</th>
+                  <th>DURATION</th>
+                  <th>FWD_PKTS</th>
+                  <th>BWD_PKTS</th>
+                  <th>BYTES/S</th>
+                  <th>SYN</th>
+                  <th>ACK</th>
+                  <th>RST</th>
+                  <th>P(INFIL)</th>
+                  <th>STAGE</th>
+                </tr>
+              </thead>
+              <tbody>
+                {flows.map((f, i) => (
+                  <tr key={f.id} style={{ cursor: 'default' }}>
+                    <td style={{ color: 'var(--text-muted)' }}>{flows.length - i}</td>
+                    <td>{formatTime(f.timestamp)}</td>
+                    <td>{formatDuration(f.features?.flow_duration)}</td>
+                    <td>{f.features?.tot_fwd_pkts?.toFixed(0) || 0}</td>
+                    <td>{f.features?.tot_bwd_pkts?.toFixed(0) || 0}</td>
+                    <td>{f.features?.flow_bytes_s?.toFixed(0) || 0}</td>
+                    <td>{f.features?.syn_flag_cnt?.toFixed(0) || 0}</td>
+                    <td>{f.features?.ack_flag_cnt?.toFixed(0) || 0}</td>
+                    <td>{f.features?.rst_flag_cnt?.toFixed(0) || 0}</td>
+                    <td style={{ color: (f.infiltration_prob || 0) > 0.5 ? 'var(--severity-critical)' : 'var(--severity-low)' }}>
+                      {formatProb(f.infiltration_prob)}
+                    </td>
+                    <td><span className={`stage-badge ${stageClass(f.predicted_stage || 'Benign')}`}>{f.predicted_stage || 'Benign'}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
     </>
   );
 }
+
+
+// ═══════════════════════════════════════════════════════════════
+// LIVE LOGS — WebSocket terminal feed
+// ═══════════════════════════════════════════════════════════════
+function LiveLogsView() {
+  const [lines, setLines] = useState([]);
+  const [connected, setConnected] = useState(false);
+  const containerRef = useRef(null);
+  const wsRef = useRef(null);
+
+  useEffect(() => {
+    const ws = createWebSocket();
+    wsRef.current = ws;
+
+    ws.onopen = () => setConnected(true);
+    ws.onclose = () => setConnected(false);
+    ws.onerror = () => setConnected(false);
+
+    ws.onmessage = (evt) => {
+      try {
+        const data = JSON.parse(evt.data);
+        if (data.type === 'pong') return;
+        setLines(prev => {
+          const next = [...prev, { ...data, _ts: new Date().toISOString() }];
+          return next.length > 500 ? next.slice(-500) : next;
+        });
+      } catch { /* ignore non-JSON */ }
+    };
+
+    // Ping keepalive
+    const pingIv = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) ws.send('ping');
+    }, 15000);
+
+    return () => {
+      clearInterval(pingIv);
+      ws.close();
+    };
+  }, []);
+
+  // Auto-scroll
+  useEffect(() => {
+    if (containerRef.current) {
+      containerRef.current.scrollTop = containerRef.current.scrollHeight;
+    }
+  }, [lines]);
+
+  return (
+    <div className="terminal">
+      <div className="terminal-header">
+        <span className="terminal-title">
+          LIVE_FLOW_FEED {connected ? '// CONNECTED' : '// DISCONNECTED'}
+        </span>
+        <span style={{ fontSize: '0.6rem', color: connected ? 'var(--severity-low)' : 'var(--severity-critical)' }}>
+          &#9679; {connected ? 'LIVE' : 'OFFLINE'}
+        </span>
+      </div>
+      <div className="terminal-body" ref={containerRef}>
+        {lines.length === 0 ? (
+          <div className="terminal-empty">
+            <Radio size={24}/>
+            <p style={{ marginTop: '8px' }}>Waiting for incoming flows...</p>
+            <p style={{ fontSize: '0.65rem', marginTop: '4px' }}>
+              Run the traffic simulator or live capture to see real-time data.
+            </p>
+          </div>
+        ) : (
+          lines.map((line, i) => (
+            <div key={i} className="terminal-line">
+              <span className="ts">{formatTime(line._ts)}</span>
+              <span className="sep"> | </span>
+              <span className="ip">{line.src_ip || '?'} &rarr; {line.dst_ip || '?'}</span>
+              <span className="sep"> | </span>
+              <span className="val">{line.flow_count || 0} flows</span>
+              <span className="sep"> | </span>
+              <span className="val">P={formatProb(line.infiltration_prob)}</span>
+              <span className="sep"> | </span>
+              <span className="stage-flag">{line.predicted_stage || 'Benign'}</span>
+              {(line.infiltration_prob || 0) > 0.5 && (
+                <span className="alert-flag"> &#9650; ALERT</span>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 
 // ═══════════════════════════════════════════════════════════════
 // ALERTS VIEW — triage table
@@ -385,54 +662,52 @@ function AlertsView() {
 
   return (
     <>
-      <div style={{display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', marginBottom: 'var(--sp-4)'}}>
-        <span style={{fontSize: '0.8rem', fontWeight: 600}}>Alerts</span>
-        <div style={{display: 'flex', gap: 'var(--sp-1)'}}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', marginBottom: 'var(--sp-4)' }}>
+        <span className="section-label" style={{ marginBottom: 0 }}>FILTER:</span>
+        <div style={{ display: 'flex', gap: 'var(--sp-1)' }}>
           {['all', 'critical', 'high', 'medium'].map(f => (
             <button key={f} className={`btn btn-sm ${filter === f ? 'btn-primary' : ''}`} onClick={() => setFilter(f)}>
-              {f}
+              {f.toUpperCase()}
             </button>
           ))}
         </div>
       </div>
 
-      <div className="data-table-container">
+      <div className="data-table-wrap">
         {loading ? (
           <div className="empty-state"><div className="loading-spinner"/></div>
         ) : alerts.length === 0 ? (
           <div className="empty-state">
-            <Shield size={32}/>
+            <Shield size={28} color="var(--text-muted)"/>
             <p>No alerts. System is clear.</p>
           </div>
         ) : (
           <table className="data-table">
             <thead>
               <tr>
-                <th>Severity</th>
-                <th>Session</th>
-                <th>Stage</th>
-                <th>P(Infiltration)</th>
-                <th>Recommended Action</th>
-                <th>Time</th>
-                <th>Status</th>
+                <th>SEVERITY</th>
+                <th>SESSION</th>
+                <th>STAGE</th>
+                <th>P(INFIL)</th>
+                <th>ACTION</th>
+                <th>TIME</th>
+                <th>STATUS</th>
               </tr>
             </thead>
             <tbody>
               {alerts.map(a => (
-                <tr key={a.id}>
-                  <td><span className={`severity-badge ${a.severity}`}>{a.severity}</span></td>
-                  <td className="mono">{a.session_key.substring(0, 28)}</td>
+                <tr key={a.id} style={{ cursor: 'default' }}>
+                  <td><span className={`severity-badge ${a.severity}`}>{a.severity.toUpperCase()}</span></td>
+                  <td>{a.session_key?.substring(0, 24) || '\u2014'}</td>
                   <td><span className={`stage-badge ${stageClass(a.predicted_stage)}`}>{a.predicted_stage}</span></td>
-                  <td className="mono">{formatProb(a.infiltration_prob)}</td>
+                  <td>{formatProb(a.infiltration_prob)}</td>
                   <td><span className="alert-action">{a.recommended_action}</span></td>
-                  <td className="mono">{formatTime(a.created_at)}</td>
+                  <td>{formatTime(a.created_at)}</td>
                   <td>
                     {a.acknowledged ? (
-                      <span className="flex items-center gap-2" style={{color: 'var(--text-muted)', fontSize: '0.75rem'}}>
-                        <Check size={12}/> Ack'd
-                      </span>
+                      <span className="mono text-sm text-muted"><Check size={11}/> ACK</span>
                     ) : (
-                      <button className="btn btn-sm" onClick={() => acknowledge(a.id)}>Acknowledge</button>
+                      <button className="btn btn-sm" onClick={() => acknowledge(a.id)}>ACK</button>
                     )}
                   </td>
                 </tr>
@@ -445,8 +720,281 @@ function AlertsView() {
   );
 }
 
+
 // ═══════════════════════════════════════════════════════════════
-// INGEST PANEL — CSV upload
+// EXPLAIN VIEW — standalone feature attribution
+// ═══════════════════════════════════════════════════════════════
+function ExplainView() {
+  const [sessions, setSessions] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [explanation, setExplanation] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    apiFetch('/sessions?limit=50').then(setSessions).catch(() => {});
+  }, []);
+
+  const explain = (session) => {
+    setSelected(session);
+    setLoading(true);
+    apiFetch(`/sessions/${encodeURIComponent(session.session_key)}/flows?limit=6`)
+      .then(flows => {
+        if (flows.length < 6) throw new Error('Need 6+ flows');
+        const window = flows.slice(0, 6).reverse().map(f => {
+          const feats = f.features;
+          return [
+            feats.flow_duration, feats.tot_fwd_pkts, feats.tot_bwd_pkts,
+            feats.fwd_pkt_len_mean, feats.bwd_pkt_len_mean, feats.flow_bytes_s,
+            feats.flow_pkts_s, feats.flow_iat_mean, feats.flow_iat_std,
+            feats.fwd_iat_mean, feats.bwd_iat_mean, feats.syn_flag_cnt,
+            feats.ack_flag_cnt, feats.fin_flag_cnt, feats.rst_flag_cnt,
+            feats.psh_flag_cnt, feats.urg_flag_cnt, feats.down_up_ratio,
+            feats.pkt_size_avg, feats.ttl_variance, feats.tcp_win_size,
+            feats.retransmit_cnt,
+          ];
+        });
+        return apiPost('/explain', { window, top_k: 22, needs_scaling: true });
+      })
+      .then(result => { setExplanation(result); setLoading(false); })
+      .catch(e => { setLoading(false); });
+  };
+
+  const maxImp = explanation?.attributions
+    ? Math.max(...explanation.attributions.map(a => Math.abs(a.importance)))
+    : 1;
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 'var(--sp-4)' }}>
+      {/* Session picker */}
+      <div className="panel">
+        <div className="panel-header">
+          <span className="panel-title">SELECT_SESSION</span>
+        </div>
+        <div style={{ maxHeight: 'calc(100vh - 200px)', overflowY: 'auto' }}>
+          {sessions.map(s => (
+            <div
+              key={s.session_key}
+              onClick={() => explain(s)}
+              style={{
+                padding: 'var(--sp-2) var(--sp-3)',
+                borderBottom: '1px solid var(--border-muted)',
+                cursor: 'pointer',
+                background: selected?.session_key === s.session_key ? 'var(--accent-muted)' : 'transparent',
+              }}
+            >
+              <div className="mono" style={{ fontSize: '0.7rem' }}>{s.src_ip} &rarr; {s.dst_ip}</div>
+              <div style={{ display: 'flex', gap: 'var(--sp-2)', marginTop: '2px', alignItems: 'center' }}>
+                <span className={`stage-badge ${stageClass(s.latest_stage)}`}>{s.latest_stage}</span>
+                <span className="mono text-muted" style={{ fontSize: '0.6rem' }}>{s.flow_count} flows</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Attribution display */}
+      <div className="panel">
+        <div className="panel-header">
+          <span className="panel-title">FEATURE_ATTRIBUTION</span>
+          <span className="panel-meta">Gradient &times; Input (all 22 features)</span>
+        </div>
+        <div className="panel-body">
+          {loading ? (
+            <div className="empty-state"><div className="loading-spinner"/><p>Computing attributions...</p></div>
+          ) : !explanation ? (
+            <div className="empty-state"><Eye size={28} color="var(--text-muted)"/><p>Select a session to explain.</p></div>
+          ) : (
+            <>
+              <div style={{ marginBottom: 'var(--sp-4)', display: 'flex', gap: 'var(--sp-4)', alignItems: 'baseline' }}>
+                <div>
+                  <span className="mono" style={{ fontSize: '1.3rem', fontWeight: 700 }}>{formatProb(explanation.infiltration_probability)}</span>
+                  <span className="text-sm text-muted" style={{ marginLeft: 'var(--sp-2)' }}>P(INFILTRATION)</span>
+                </div>
+                <span className={`stage-badge ${stageClass(explanation.predicted_stage)}`}>{explanation.predicted_stage}</span>
+              </div>
+              <div className="shap-bar-container">
+                {explanation.attributions.map((attr, i) => (
+                  <div key={i} className="shap-row">
+                    <span className="shap-feature">{attr.feature}</span>
+                    <div className="shap-bar-track">
+                      <div
+                        className={`shap-bar ${attr.direction}`}
+                        style={{ width: `${(Math.abs(attr.importance) / maxImp) * 100}%` }}
+                      />
+                    </div>
+                    <span className="shap-value">{attr.importance > 0 ? '+' : ''}{attr.importance.toFixed(4)}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ marginTop: 'var(--sp-3)', display: 'flex', gap: 'var(--sp-4)', fontSize: '0.62rem' }}>
+                <span style={{ color: 'var(--severity-critical)' }}>&#9632; pushes &rarr; MALICIOUS</span>
+                <span style={{ color: 'var(--severity-low)' }}>&#9632; pushes &rarr; BENIGN</span>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// REPORTS — aggregate stats + stage distribution
+// ═══════════════════════════════════════════════════════════════
+function ReportsView() {
+  const [stats, setStats] = useState({});
+  const [alertStats, setAlertStats] = useState({});
+  const [stageDist, setStageDist] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      apiFetch('/dashboard/stats'),
+      apiFetch('/alerts/stats'),
+      apiFetch('/dashboard/stage-distribution').catch(() => []),
+    ]).then(([st, as, sd]) => {
+      setStats(st);
+      setAlertStats(as);
+      setStageDist(Array.isArray(sd) ? sd : []);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
+
+  const maxCount = stageDist.length > 0 ? Math.max(...stageDist.map(s => s.count)) : 1;
+
+  const copySummary = () => {
+    const summary = {
+      generated_at: new Date().toISOString(),
+      total_sessions: stats.total_sessions,
+      total_flows: stats.total_flows,
+      at_risk_sessions: stats.at_risk_sessions,
+      total_alerts: alertStats.total,
+      unacknowledged_alerts: alertStats.unacknowledged,
+      critical_unacknowledged: alertStats.critical_unacknowledged,
+      stage_distribution: stageDist,
+    };
+    navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+  };
+
+  if (loading) {
+    return <div className="empty-state"><div className="loading-spinner"/><p>Loading report data...</p></div>;
+  }
+
+  return (
+    <>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-4)' }}>
+        <span className="section-label" style={{ marginBottom: 0 }}>SYSTEM_REPORT</span>
+        <button className="btn btn-sm" onClick={copySummary}>COPY JSON</button>
+      </div>
+
+      <div className="report-grid">
+        {/* Stats panel */}
+        <div className="panel">
+          <div className="panel-header">
+            <span className="panel-title">SUMMARY_STATS</span>
+          </div>
+          <div className="panel-body">
+            <div className="settings-row"><span className="settings-key">TOTAL_SESSIONS</span><span className="settings-val">{stats.total_sessions || 0}</span></div>
+            <div className="settings-row"><span className="settings-key">TOTAL_FLOWS</span><span className="settings-val">{stats.total_flows || 0}</span></div>
+            <div className="settings-row"><span className="settings-key">AT_RISK_SESSIONS</span><span className="settings-val" style={{ color: (stats.at_risk_sessions || 0) > 0 ? 'var(--severity-critical)' : undefined }}>{stats.at_risk_sessions || 0}</span></div>
+            <div className="settings-row"><span className="settings-key">TOTAL_ALERTS</span><span className="settings-val">{alertStats.total || 0}</span></div>
+            <div className="settings-row"><span className="settings-key">UNACKNOWLEDGED</span><span className="settings-val" style={{ color: (alertStats.unacknowledged || 0) > 0 ? 'var(--severity-high)' : undefined }}>{alertStats.unacknowledged || 0}</span></div>
+            <div className="settings-row"><span className="settings-key">CRITICAL_UNACK</span><span className="settings-val" style={{ color: (alertStats.critical_unacknowledged || 0) > 0 ? 'var(--severity-critical)' : undefined }}>{alertStats.critical_unacknowledged || 0}</span></div>
+          </div>
+        </div>
+
+        {/* Stage distribution */}
+        <div className="panel">
+          <div className="panel-header">
+            <span className="panel-title">STAGE_DISTRIBUTION</span>
+          </div>
+          <div className="panel-body">
+            {stageDist.length === 0 ? (
+              <div className="empty-state" style={{ padding: 'var(--sp-6)' }}><p>No stage data yet.</p></div>
+            ) : (
+              stageDist.map(s => (
+                <div key={s.stage} className="stage-dist-bar">
+                  <span className="stage-dist-label">{s.stage}</span>
+                  <div className="stage-dist-track">
+                    <div
+                      className="stage-dist-fill"
+                      style={{ width: `${(s.count / maxCount) * 100}%`, background: stageColor(s.stage) }}
+                    />
+                  </div>
+                  <span className="stage-dist-count">{s.count}</span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// SETTINGS — model info, health, feature list
+// ═══════════════════════════════════════════════════════════════
+function SettingsView({ health }) {
+  return (
+    <div className="settings-grid">
+      <div className="panel">
+        <div className="panel-header">
+          <span className="panel-title">MODEL_INFO</span>
+        </div>
+        <div className="panel-body">
+          <div className="settings-row"><span className="settings-key">ARCHITECTURE</span><span className="settings-val">LSTM (hidden=64)</span></div>
+          <div className="settings-row"><span className="settings-key">DEVICE</span><span className="settings-val">{health?.device?.toUpperCase() || 'CPU'}</span></div>
+          <div className="settings-row"><span className="settings-key">FEATURES</span><span className="settings-val">{health?.features_count || 22}</span></div>
+          <div className="settings-row"><span className="settings-key">WINDOW_SIZE</span><span className="settings-val">6</span></div>
+          <div className="settings-row"><span className="settings-key">STAGES</span><span className="settings-val">{health?.stages?.length || 6}</span></div>
+          <div className="settings-row"><span className="settings-key">ALERT_THRESHOLD</span><span className="settings-val">0.50</span></div>
+          <div className="settings-row"><span className="settings-key">MC_SAMPLES</span><span className="settings-val">20</span></div>
+          <div className="settings-row"><span className="settings-key">EMA_ALPHA</span><span className="settings-val">0.40</span></div>
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-header">
+          <span className="panel-title">SYSTEM_HEALTH</span>
+        </div>
+        <div className="panel-body">
+          <div className="settings-row"><span className="settings-key">STATUS</span><span className="settings-val" style={{ color: health?.status === 'ok' ? 'var(--severity-low)' : 'var(--severity-critical)' }}>{health?.status?.toUpperCase() || 'UNKNOWN'}</span></div>
+          <div className="settings-row"><span className="settings-key">MODEL_LOADED</span><span className="settings-val">{health?.model_loaded ? 'YES' : 'NO'}</span></div>
+          <div className="settings-row"><span className="settings-key">DB_CONNECTED</span><span className="settings-val">{health?.db_connected ? 'YES' : 'NO'}</span></div>
+          <div className="settings-row"><span className="settings-key">ARTIFACTS_PATH</span><span className="settings-val text-sm" style={{ maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{health?.artifacts_path || '\u2014'}</span></div>
+        </div>
+      </div>
+
+      <div className="panel" style={{ gridColumn: '1 / -1' }}>
+        <div className="panel-header">
+          <span className="panel-title">FEATURE_REFERENCE</span>
+          <span className="panel-meta">22 CIC-IDS network flow features</span>
+        </div>
+        <div className="panel-body">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 'var(--sp-1)' }}>
+            {(health?.stages ? [
+              'flow_duration', 'tot_fwd_pkts', 'tot_bwd_pkts', 'fwd_pkt_len_mean',
+              'bwd_pkt_len_mean', 'flow_bytes_s', 'flow_pkts_s', 'flow_iat_mean',
+              'flow_iat_std', 'fwd_iat_mean', 'bwd_iat_mean', 'syn_flag_cnt',
+              'ack_flag_cnt', 'fin_flag_cnt', 'rst_flag_cnt', 'psh_flag_cnt',
+              'urg_flag_cnt', 'down_up_ratio', 'pkt_size_avg', 'ttl_variance',
+              'tcp_win_size', 'retransmit_cnt',
+            ] : []).map(f => (
+              <span key={f} className="mono" style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', padding: '2px 0' }}>{f}</span>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// INGEST — CSV upload
 // ═══════════════════════════════════════════════════════════════
 function IngestPanel() {
   const [result, setResult] = useState(null);
@@ -478,11 +1026,10 @@ function IngestPanel() {
 
   return (
     <>
-      <div style={{marginBottom: 'var(--sp-4)'}}>
-        <span style={{fontSize: '0.8rem', fontWeight: 600}}>Ingest Flow Data</span>
-        <p style={{fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 'var(--sp-1)'}}>
-          Upload a CSV with the 22 CIC-IDS features. Each row is a flow record.
-          Include <code className="mono">src_ip</code>, <code className="mono">dst_ip</code>, <code className="mono">timestamp</code> columns for session grouping.
+      <div style={{ marginBottom: 'var(--sp-4)' }}>
+        <span className="section-label">INGEST_FLOW_DATA</span>
+        <p className="mono text-sm" style={{ color: 'var(--text-secondary)', marginTop: 'var(--sp-1)' }}>
+          Upload a CSV with the 22 CIC-IDS features. Include <strong>src_ip</strong>, <strong>dst_ip</strong>, <strong>timestamp</strong> for session grouping.
         </p>
       </div>
 
@@ -494,38 +1041,41 @@ function IngestPanel() {
         onDragLeave={() => setDragging(false)}
       >
         {uploading ? (
-          <><div className="loading-spinner" style={{margin: '0 auto var(--sp-2)'}}/><p>Processing...</p></>
+          <><div className="loading-spinner" style={{ margin: '0 auto var(--sp-2)' }}/><p>Processing...</p></>
         ) : (
-          <><Upload size={28} className="upload-icon"/><p>Drop a CSV file here or click to browse</p></>
+          <><Upload size={26} className="upload-icon"/><p>Drop a CSV file here or click to browse</p></>
         )}
-        <input ref={fileRef} type="file" accept=".csv" style={{display: 'none'}} onChange={e => handleFile(e.target.files[0])}/>
+        <input ref={fileRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={e => handleFile(e.target.files[0])}/>
       </div>
 
       {result && (
         <div className="panel mt-4">
+          <div className="panel-header">
+            <span className="panel-title">INGEST_RESULT</span>
+          </div>
           <div className="panel-body">
             {result.error ? (
-              <p style={{color: 'var(--severity-critical)'}}>{result.error}</p>
+              <p style={{ color: 'var(--severity-critical)' }}>{result.error}</p>
             ) : (
               <>
                 <div className="stats-bar">
-                  <div className="stat-item">
-                    <span className="stat-value" style={{color: 'var(--severity-low)'}}>{result.flows_accepted}</span>
-                    <span className="stat-label">Accepted</span>
+                  <div className="stat-card">
+                    <div className="stat-card-label">ACCEPTED</div>
+                    <div className="stat-card-value" style={{ color: 'var(--severity-low)' }}>{result.flows_accepted}</div>
                   </div>
-                  <div className="stat-item">
-                    <span className="stat-value" style={{color: result.flows_rejected > 0 ? 'var(--severity-critical)' : undefined}}>{result.flows_rejected}</span>
-                    <span className="stat-label">Rejected</span>
+                  <div className="stat-card">
+                    <div className="stat-card-label">REJECTED</div>
+                    <div className="stat-card-value" style={{ color: result.flows_rejected > 0 ? 'var(--severity-critical)' : undefined }}>{result.flows_rejected}</div>
                   </div>
-                  <div className="stat-item">
-                    <span className="stat-value" style={{color: result.alerts_generated > 0 ? 'var(--severity-critical)' : undefined}}>{result.alerts_generated}</span>
-                    <span className="stat-label">Alerts generated</span>
+                  <div className="stat-card">
+                    <div className="stat-card-label">ALERTS</div>
+                    <div className="stat-card-value" style={{ color: result.alerts_generated > 0 ? 'var(--severity-high)' : undefined }}>{result.alerts_generated}</div>
                   </div>
                 </div>
                 {result.errors?.length > 0 && (
-                  <div style={{marginTop: 'var(--sp-3)'}}>
-                    <span style={{fontSize: '0.75rem', fontWeight: 600, color: 'var(--severity-high)'}}>Validation errors:</span>
-                    <ul style={{marginTop: 'var(--sp-1)', fontSize: '0.72rem', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', listStyle: 'none'}}>
+                  <div style={{ marginTop: 'var(--sp-3)' }}>
+                    <span className="mono text-sm" style={{ color: 'var(--severity-high)', fontWeight: 600 }}>VALIDATION_ERRORS:</span>
+                    <ul style={{ marginTop: 'var(--sp-1)', fontSize: '0.68rem', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', listStyle: 'none' }}>
                       {result.errors.slice(0, 10).map((e, i) => <li key={i}>{e}</li>)}
                     </ul>
                   </div>

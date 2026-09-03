@@ -136,3 +136,21 @@ async def dashboard_stats(db: AsyncSession = Depends(get_db)):
         "total_flows": total_flows.scalar() or 0,
         "at_risk_sessions": active_alerts.scalar() or 0,
     }
+
+
+@router.get("/dashboard/stage-distribution")
+async def stage_distribution(db: AsyncSession = Depends(get_db)):
+    """Count flows grouped by predicted_stage for reports."""
+    stmt = (
+        select(
+            FlowRecordDB.predicted_stage,
+            func.count(FlowRecordDB.id).label("count"),
+        )
+        .where(FlowRecordDB.predicted_stage.isnot(None))
+        .group_by(FlowRecordDB.predicted_stage)
+        .order_by(func.count(FlowRecordDB.id).desc())
+    )
+    result = await db.execute(stmt)
+    rows = result.all()
+    return [{"stage": row[0], "count": row[1]} for row in rows]
+
