@@ -301,21 +301,35 @@ class FlowExtractor:
             seq=seq,
         )
 
-        # Periodically check for expired flows
-        if self.total_packets % 100 == 0:
-            self._export_expired_flows(timestamp)
+        # Check for expired flows: every 25 packets OR every 3 seconds
+        now = time.time()
+        last_check = getattr(self, "_last_export_check", 0.0)
+        if (self.total_packets % 25 == 0) or (now - last_check >= 3.0):
+            self._last_export_check = now
+            self._export_expired_flows(now)
 
     def _export_expired_flows(self, current_time: float):
-        """Export flows that have been idle beyond the timeout."""
+        """Export flows that have been idle beyond the timeout or terminated."""
         expired_keys = []
+        stale_keys = []
+
         for key, flow in self.active_flows.items():
             idle_time = current_time - flow.last_time
-            if idle_time > self.flow_timeout and flow.packet_count >= self.min_packets:
+            # Terminated TCP flow (FIN or RST) can be exported sooner (1s idle)
+            is_terminated = (flow.fin_count > 0 or flow.rst_count > 0) and idle_time >= 1.0
+
+            if (idle_time > self.flow_timeout or is_terminated) and flow.packet_count >= self.min_packets:
                 expired_keys.append(key)
+            elif idle_time > (self.flow_timeout * 2):
+                # Stale flow with fewer than min_packets: clean up to avoid memory leak
+                stale_keys.append(key)
 
         for key in expired_keys:
             flow = self.active_flows.pop(key)
             self._send_to_api(flow)
+
+        for key in stale_keys:
+            self.active_flows.pop(key, None)
 
     def _send_to_api(self, flow: FlowState):
         """Send extracted flow features to the backend API."""
@@ -382,51 +396,351 @@ class FlowExtractor:
         print(f"{'='*60}\n")
 
 
+def get_network_interfaces():
+    """
+    Discover network interfaces with friendly names, descriptions, and IPv4 addresses.
+    Returns (interfaces_list, active_ip).
+    """
+    interfaces = []
+    active_ip = None
+
+    # Determine default outbound IPv4 via route check
+    try:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        active_ip = s.getsockname()[0]
+        s.close()
+    except Exception:
+        pass
+
+    # Inspect Scapy's conf.ifaces
+    try:
+        for k, iface in conf.ifaces.items():
+            name = getattr(iface, "name", str(k))
+            desc = getattr(iface, "description", "")
+            ip = getattr(iface, "ip", "")
+            ip_str = str(ip) if ip else ""
+
+            # Filter loopback and WAN virtual noise
+            if ip_str.startswith("127.") or "loopback" in name.lower() or "loopback" in desc.lower():
+                continue
+
+            is_active = (ip_str == active_ip) if active_ip else (bool(ip_str) and not ip_str.startswith("169.254."))
+
+            interfaces.append({
+                "name": name,
+                "description": desc,
+                "ip": ip_str,
+                "is_active": is_active,
+                "scapy_key": k,
+                "iface": iface,
+            })
+    except Exception:
+        pass
+
+    # If no interfaces parsed from Scapy but we have active_ip
+    if not interfaces and active_ip:
+        interfaces.append({
+            "name": "Default Interface",
+            "description": f"Active network adapter ({active_ip})",
+            "ip": active_ip,
+            "is_active": True,
+            "scapy_key": active_ip,
+            "iface": active_ip,
+        })
+
+    return interfaces, active_ip
+
+
 def list_interfaces():
-    """List available network interfaces."""
-    print("\nAvailable network interfaces:")
-    print("-" * 40)
-    for iface in get_if_list():
-        print(f"  {iface}")
+    """List available network interfaces in a clean, readable format."""
+    interfaces, active_ip = get_network_interfaces()
+    print("\nAvailable Network Interfaces:")
+    print("=" * 80)
+    print(f"{'Name / Alias':<20} | {'IPv4 Address':<16} | {'Status':<10} | {'Description'}")
+    print("-" * 80)
+
+    for iface in interfaces:
+        status = "ACTIVE" if iface["is_active"] else ("CONNECTED" if iface["ip"] and not iface["ip"].startswith("169.254.") else "DISCONNECTED")
+        print(f"{iface['name']:<20} | {iface['ip']:<16} | {status:<10} | {iface['description']}")
+
+    print("=" * 80)
+    print("Run with --interface <name> (or --interface auto for active adapter).")
+    print("Run as Administrator for live packet capture on Windows.\n")
+
+
+def resolve_interface(interface_arg: Optional[str] = None) -> dict:
+    """
+    Resolve requested interface name to an interface dict with valid IP and Scapy handle.
+    Falls back gracefully if requested interface is disconnected.
+    """
+    interfaces, active_ip = get_network_interfaces()
+
+    # Find the primary active interface
+    active_iface = None
+    for iface in interfaces:
+        if iface["is_active"]:
+            active_iface = iface
+            break
+
+    if not active_iface and interfaces:
+        # Pick first with a valid non-link-local IP
+        for iface in interfaces:
+            if iface["ip"] and not iface["ip"].startswith("169.254."):
+                active_iface = iface
+                break
+
+    # If user didn't specify or passed 'auto'
+    if not interface_arg or interface_arg.lower() in ("auto", "default"):
+        if active_iface:
+            logger.info("Auto-selected active interface: %s (%s - %s)",
+                        active_iface["name"], active_iface["ip"], active_iface["description"])
+            return active_iface
+        elif interfaces:
+            return interfaces[0]
+        else:
+            return {"name": "Default", "description": "Default", "ip": active_ip or "0.0.0.0", "scapy_key": "auto"}
+
+    target = interface_arg.strip().lower()
+
+    # Search for requested interface by name, description, ip, or scapy_key
+    matched = None
+    for iface in interfaces:
+        if (target == iface["name"].lower() or
+            target == iface["ip"].lower() or
+            target in iface["name"].lower() or
+            target in iface["description"].lower() or
+            target == str(iface.get("scapy_key", "")).lower()):
+            matched = iface
+            break
+
+    if matched:
+        # Check if matched interface is actually connected
+        if not matched["ip"] or matched["ip"].startswith("169.254."):
+            if active_iface:
+                logger.warning(
+                    "Requested interface '%s' has no active connection (IP: %s). "
+                    "Automatically switching to active connected interface: '%s' (%s)",
+                    interface_arg, matched.get("ip", "none"), active_iface["name"], active_iface["ip"]
+                )
+                return active_iface
+        return matched
+
+    # Interface not matched by name
+    if active_iface:
+        logger.warning(
+            "Interface '%s' not recognized. Falling back to active adapter: '%s' (%s)",
+            interface_arg, active_iface["name"], active_iface["ip"]
+        )
+        return active_iface
+
+    # Default fallback
+    return {"name": interface_arg, "description": interface_arg, "ip": active_ip or "0.0.0.0", "scapy_key": interface_arg}
+
+
+def _run_traffic_simulator(api_url: str):
+    """Fallback runner for traffic simulator."""
+    import subprocess
+    from pathlib import Path
+
+    sim_script = Path(__file__).resolve().parent.parent / "demo" / "traffic_simulator.py"
+    if sim_script.exists():
+        logger.info("Starting Traffic Simulator: %s", sim_script)
+        cmd = [sys.executable, str(sim_script), "--api", api_url, "--sessions", "4", "--speed", "1.0"]
+        try:
+            subprocess.run(cmd)
+        except KeyboardInterrupt:
+            pass
+    else:
+        logger.error("Traffic simulator script not found at %s", sim_script)
+
+
+def _handle_permission_denied(api_url: str, fallback_sim: bool = False):
+    """Display guidance when packet capture lacks Administrator rights."""
+    print("\n" + "=" * 76)
+    print("  [!] LIVE PACKET CAPTURE REQUIRES ADMINISTRATOR PRIVILEGES")
+    print("=" * 76)
+    print("  Capturing live network packets on Windows requires Administrator rights.")
     print()
-    print("Use --interface <name> to capture on a specific interface.")
-    print("On Windows, you may need the full name or the NPF device path.")
-    print("Run as Administrator for live capture.\n")
+    print("  How to fix:")
+    print("  1. Launch start_all.ps1 (it automatically requests UAC elevation), OR")
+    print("  2. Right-click PowerShell -> 'Run as Administrator', then run:")
+    print(f"     python capture\\live_capture.py --interface auto --api {api_url}")
+    print()
+    print("  Note on Npcap:")
+    print("  - Installing Npcap (https://npcap.com/#download) with 'WinPcap API-compatible")
+    print("    Mode' enabled provides full Layer-2 packet sniffing.")
+    print("  - Without Npcap, Windows native Raw Socket capture is used (needs Admin).")
+    print()
+    print("  Alternatively, you can run the Traffic Simulator to demo attacks without Admin:")
+    print(f"     python demo/traffic_simulator.py --api {api_url}")
+    print("=" * 76 + "\n")
+
+    if fallback_sim:
+        logger.info("Launching Traffic Simulator as fallback...")
+        _run_traffic_simulator(api_url)
+    else:
+        try:
+            if sys.stdin.isatty():
+                ans = input("Would you like to launch the Traffic Simulator now? [Y/n]: ").strip().lower()
+                if ans in ("", "y", "yes"):
+                    _run_traffic_simulator(api_url)
+                    return
+        except Exception:
+            pass
+        sys.exit(1)
 
 
-def capture_live(interface: str, api_url: str, count: int = 0,
-                 timeout_sec: float = 30.0):
-    """Live packet capture from a network interface."""
-    logger.info("Starting live capture on interface: %s", interface)
-    logger.info("Sending flows to: %s", api_url)
-    logger.info("Press Ctrl+C to stop.\n")
+def _capture_with_raw_socket(bind_ip: str, extractor: FlowExtractor, count: int,
+                             api_url: str, fallback_sim: bool = False):
+    """
+    Capture live packets on Windows using native Raw Sockets (SIO_RCVALL).
+    Works on Windows without needing Npcap or WinPcap, requiring Administrator rights.
+    """
+    import socket
 
-    extractor = FlowExtractor(api_url=api_url, flow_timeout=timeout_sec)
+    if not bind_ip or bind_ip.startswith(("127.", "169.254.")):
+        logger.error("Cannot bind raw socket: Invalid or unassigned IP address '%s'.", bind_ip)
+        _handle_permission_denied(api_url, fallback_sim)
+        return
+
+    s = None
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_IP)
+        s.bind((bind_ip, 0))
+        s.setsockopt(socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
+        s.ioctl(socket.SIO_RCVALL, socket.RCVALL_ON)
+    except PermissionError:
+        logger.error("Permission denied: Raw socket capture on Windows requires Administrator privileges.")
+        _handle_permission_denied(api_url, fallback_sim)
+        return
+    except OSError as e:
+        if getattr(e, "winerror", None) == 10013:
+            logger.error("Permission denied (WinError 10013): Run PowerShell as Administrator.")
+        else:
+            logger.error("Failed to bind raw socket on %s: %s", bind_ip, e)
+        _handle_permission_denied(api_url, fallback_sim)
+        return
+
+    logger.info("=" * 65)
+    logger.info("  LIVE RAW SOCKET CAPTURE ACTIVE")
+    logger.info("  Listening on IP address: %s", bind_ip)
+    logger.info("  Capturing live IPv4 packets (SIO_RCVALL)...")
+    logger.info("  Press Ctrl+C to stop.")
+    logger.info("=" * 65)
+
+    pkt_count = 0
+    last_heartbeat = time.time()
 
     try:
-        sniff(
-            iface=interface,
-            prn=extractor.process_packet,
-            count=count if count > 0 else 0,
-            store=False,  # Don't store packets in memory
-        )
+        while True:
+            raw_data, _ = s.recvfrom(65535)
+            now = time.time()
+            try:
+                pkt = IP(raw_data)
+                pkt.time = now
+                extractor.process_packet(pkt)
+                pkt_count += 1
+                if count > 0 and pkt_count >= count:
+                    break
+            except Exception:
+                pass
+
+            if now - last_heartbeat >= 10.0:
+                last_heartbeat = now
+                logger.info(
+                    "Live capture active... (Packets: %d | Active flows: %d | Exported: %d)",
+                    extractor.total_packets,
+                    len(extractor.active_flows),
+                    extractor.exported_count,
+                )
     except KeyboardInterrupt:
-        pass
-    except PermissionError:
-        logger.error("Permission denied. Run as Administrator/root for live capture.")
-        sys.exit(1)
+        logger.info("\nCapture stopped by user.")
     finally:
+        if s:
+            try:
+                s.ioctl(socket.SIO_RCVALL, socket.RCVALL_OFF)
+            except Exception:
+                pass
+            try:
+                s.close()
+            except Exception:
+                pass
         extractor.export_all_remaining()
         extractor.print_stats()
 
 
+def capture_live(interface_arg: Optional[str], api_url: str, count: int = 0,
+                 timeout_sec: float = 10.0, fallback_sim: bool = False):
+    """Live packet capture with auto-detection, Npcap support, and native Raw Socket fallback."""
+    resolved = resolve_interface(interface_arg)
+    iface_name = resolved["name"]
+    iface_ip = resolved.get("ip", "")
+    scapy_iface = resolved.get("scapy_key", iface_name)
+
+    logger.info("Target network interface: %s (%s)", iface_name, iface_ip or "No IPv4")
+    logger.info("Sending flows to API:      %s", api_url)
+
+    extractor = FlowExtractor(api_url=api_url, flow_timeout=timeout_sec, min_packets=2)
+
+    # Check if Npcap is available for Scapy Layer 2 sniffing
+    has_npcap = False
+    try:
+        if getattr(conf, "use_pcap", False):
+            has_npcap = True
+    except Exception:
+        pass
+
+    if has_npcap:
+        logger.info("Npcap detected. Using Layer-2 capture on %s", scapy_iface)
+        logger.info("Press Ctrl+C to stop.\n")
+        try:
+            sniff(
+                iface=scapy_iface,
+                prn=extractor.process_packet,
+                count=count if count > 0 else 0,
+                store=False,
+            )
+        except PermissionError:
+            logger.error("Permission denied. Run as Administrator for live capture.")
+            _handle_permission_denied(api_url, fallback_sim)
+        except RuntimeError as e:
+            logger.warning("Scapy sniff failed (%s). Falling back to Windows native raw socket...", e)
+            _capture_with_raw_socket(iface_ip, extractor, count, api_url, fallback_sim)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            extractor.export_all_remaining()
+            extractor.print_stats()
+    else:
+        if sys.platform == "win32":
+            logger.info("Npcap not detected. Using Windows native Raw Socket capture...")
+            _capture_with_raw_socket(iface_ip, extractor, count, api_url, fallback_sim)
+        else:
+            logger.info("Starting live capture on %s...", scapy_iface)
+            try:
+                sniff(
+                    iface=scapy_iface,
+                    prn=extractor.process_packet,
+                    count=count if count > 0 else 0,
+                    store=False,
+                )
+            except Exception as e:
+                logger.error("Live capture error: %s", e)
+                _handle_permission_denied(api_url, fallback_sim)
+            finally:
+                extractor.export_all_remaining()
+                extractor.print_stats()
+
+
 def process_pcap(pcap_path: str, api_url: str, speed: float = 0.0,
-                 timeout_sec: float = 30.0):
+                 timeout_sec: float = 10.0):
     """Process a pcap/pcapng file and extract flows."""
     logger.info("Processing pcap: %s", pcap_path)
     logger.info("Sending flows to: %s", api_url)
 
-    extractor = FlowExtractor(api_url=api_url, flow_timeout=timeout_sec)
+    extractor = FlowExtractor(api_url=api_url, flow_timeout=timeout_sec, min_packets=2)
 
     try:
         packets = rdpcap(pcap_path)
@@ -460,17 +774,20 @@ def main():
             "sends them to the backend for real-time attack forecasting."
         )
     )
-    parser.add_argument("--interface", "-i", help="Network interface for live capture")
+    parser.add_argument("--interface", "-i", default="auto",
+                        help="Network interface for live capture (default: 'auto' for active adapter)")
     parser.add_argument("--pcap", "-p", help="Path to pcap/pcapng file to process")
     parser.add_argument("--api", default="http://localhost:8000", help="Backend API URL")
     parser.add_argument("--speed", type=float, default=0.0,
                         help="Delay between packets in pcap replay (0=full speed)")
-    parser.add_argument("--timeout", type=float, default=30.0,
-                        help="Flow inactivity timeout in seconds")
+    parser.add_argument("--timeout", type=float, default=10.0,
+                        help="Flow inactivity timeout in seconds (default: 10.0)")
     parser.add_argument("--count", type=int, default=0,
                         help="Max packets to capture (0=unlimited)")
     parser.add_argument("--list-interfaces", action="store_true",
                         help="List available network interfaces and exit")
+    parser.add_argument("--fallback-simulator", action="store_true",
+                        help="Automatically fall back to Traffic Simulator if packet capture cannot start")
 
     args = parser.parse_args()
 
@@ -478,7 +795,7 @@ def main():
         list_interfaces()
         return
 
-    # Verify backend
+    # Verify backend connectivity
     try:
         resp = requests.get(f"{args.api}/health", timeout=5)
         health = resp.json()
@@ -495,14 +812,11 @@ def main():
 
     if args.pcap:
         process_pcap(args.pcap, args.api, speed=args.speed, timeout_sec=args.timeout)
-    elif args.interface:
-        capture_live(args.interface, args.api, count=args.count, timeout_sec=args.timeout)
     else:
-        print("ERROR: Specify either --interface for live capture or --pcap for file processing")
-        print("       Use --list-interfaces to see available interfaces")
-        parser.print_help()
-        sys.exit(1)
+        capture_live(args.interface, args.api, count=args.count, timeout_sec=args.timeout,
+                     fallback_sim=args.fallback_simulator)
 
 
 if __name__ == "__main__":
     main()
+
