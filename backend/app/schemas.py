@@ -192,6 +192,7 @@ class HealthResponse(BaseModel):
     features: list[str]  # BUG-08: ordered feature list for frontend to consume
     stages: list[str]
     device: str
+    system_mode: Optional[str] = "live"
 
 
 # ── WebSocket messages ───────────────────────────────────────────────

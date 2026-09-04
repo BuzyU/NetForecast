@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import ALLOWED_ORIGINS, ARTIFACTS_DIR, FLOW_FEATURES, N_FEATURES, STAGES
 from .database import init_db
 from .model_loader import artifacts
-from .routes import alerts, explain, forecast, ingest, predict, ws
+from .routes import alerts, explain, forecast, ingest, predict, system, ws
 from .schemas import HealthResponse
 
 logging.basicConfig(
@@ -89,12 +89,14 @@ app.include_router(forecast.router, tags=["Forecasting"])
 app.include_router(explain.router, tags=["Explainability"])
 app.include_router(alerts.router, tags=["Alerts"])
 app.include_router(ingest.router, tags=["Ingestion"])
+app.include_router(system.router, tags=["System"])
 app.include_router(ws.router, tags=["Live Feed"])
 
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     from .database import engine
+    from .routes.system import SystemState
     db_ok = False
     try:
         async with engine.connect() as conn:
@@ -116,6 +118,7 @@ async def health_check():
         features=FLOW_FEATURES,  # BUG-08: single source of truth for feature order
         stages=STAGES,
         device=str(artifacts.device) if model_ok else "unavailable",
+        system_mode=SystemState.mode,
     )
 
 

@@ -98,6 +98,8 @@ export default function App() {
   const [clock, setClock] = useState(new Date());
   // BUG-08: feature order from backend — avoids 3 hardcoded copies
   const [featureList, setFeatureList] = useState(null);
+  const [systemMode, setSystemMode] = useState('live');
+  const [simulatorRunning, setSimulatorRunning] = useState(false);
 
   // Live clock
   useEffect(() => {
@@ -105,7 +107,16 @@ export default function App() {
     return () => clearInterval(t);
   }, []);
 
-  // Health + alert polling — also extracts feature list (BUG-08)
+  const fetchSystemMode = useCallback(() => {
+    apiFetch('/system/mode')
+      .then(m => {
+        if (m?.mode) setSystemMode(m.mode);
+        if (typeof m?.simulator_running === 'boolean') setSimulatorRunning(m.simulator_running);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Health + alert polling + system mode
   useEffect(() => {
     const updateHealth = (h) => {
       setHealth(h);
@@ -117,17 +128,62 @@ export default function App() {
           return h.features;
         });
       }
+      if (h?.system_mode) setSystemMode(h.system_mode);
     };
 
     apiFetch('/health').then(updateHealth).catch(() => setHealth({ status: 'offline' }));
     apiFetch('/alerts/stats').then(s => setAlertCount(s.unacknowledged || 0)).catch(() => {});
+    fetchSystemMode();
 
     const iv = setInterval(() => {
       apiFetch('/health').then(updateHealth).catch(() => setHealth({ status: 'offline' }));
       apiFetch('/alerts/stats').then(s => setAlertCount(s.unacknowledged || 0)).catch(() => {});
+      fetchSystemMode();
     }, 5000);
     return () => clearInterval(iv);
-  }, []);
+  }, [fetchSystemMode]);
+
+  const handleToggleMode = async (newMode) => {
+    try {
+      const res = await apiPost('/system/mode', { mode: newMode });
+      setSystemMode(res.mode);
+      setSimulatorRunning(res.simulator_running);
+    } catch (e) {
+      console.error('Failed to change mode', e);
+    }
+  };
+
+  const handleStartSimulator = async () => {
+    try {
+      const res = await apiPost('/system/simulator/start', {});
+      if (res.status === 'started' || res.status === 'already_running') {
+        setSimulatorRunning(true);
+      }
+    } catch (e) {
+      alert(e.message || 'Failed to start simulator');
+    }
+  };
+
+  const handleStopSimulator = async () => {
+    try {
+      await apiPost('/system/simulator/stop', {});
+      setSimulatorRunning(false);
+    } catch (e) {
+      alert(e.message || 'Failed to stop simulator');
+    }
+  };
+
+  const handlePurgeSimulated = async () => {
+    if (!window.confirm('Are you sure? This will delete all simulated flows, sessions, and alerts from the database. Live capture data will NOT be touched.')) {
+      return;
+    }
+    try {
+      const res = await apiPost('/system/purge-simulated', {});
+      alert(`Purged ${res.deleted_flows} simulated flows, ${res.deleted_sessions} sessions, and ${res.deleted_alerts} alerts.`);
+    } catch (e) {
+      alert(e.message || 'Failed to purge data');
+    }
+  };
 
   const onSelectSession = (session) => {
     setSelectedSession(session);
@@ -209,6 +265,32 @@ export default function App() {
           SYS_VIEW // <span className="view-name">[{viewLabels[view] || view.toUpperCase()}]</span>
         </span>
         <div className="header-right">
+          <button
+            onClick={() => handleToggleMode(systemMode === 'live' ? 'simulated' : 'live')}
+            className="btn btn-sm"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: '0.66rem',
+              fontWeight: 700,
+              letterSpacing: '0.04em',
+              padding: '2px 9px',
+              borderRadius: 4,
+              border: systemMode === 'live' ? '1px solid #27ae60' : '1px solid #e67e22',
+              background: systemMode === 'live' ? 'rgba(39, 174, 96, 0.1)' : 'rgba(230, 126, 34, 0.1)',
+              color: systemMode === 'live' ? '#27ae60' : '#e67e22',
+              cursor: 'pointer',
+            }}
+            title={`Click to switch mode to ${systemMode === 'live' ? 'SIMULATION' : 'LIVE ONLY'}`}
+          >
+            <span style={{
+              width: 7, height: 7, borderRadius: '50%',
+              background: systemMode === 'live' ? '#27ae60' : '#e67e22',
+              boxShadow: systemMode === 'live' ? '0 0 6px #27ae60' : '0 0 6px #e67e22',
+            }}/>
+            {systemMode === 'live' ? 'LIVE ONLY' : 'SIMULATION'}
+          </button>
           <div className="header-indicator">
             <span className={`dot ${systemStatus === 'nominal' ? '' : systemStatus}`}/>
             {health?.model_loaded ? `MODEL: ${health.device?.toUpperCase() || 'CPU'}` : 'MODEL: LOADING'}
@@ -225,14 +307,30 @@ export default function App() {
 
       {/* ── Main ── */}
       <main className="main-content">
-        {view === 'dashboard' && <Dashboard onSelectSession={onSelectSession} featureList={featureList}/>}
+        {view === 'dashboard' && (
+          <Dashboard
+            onSelectSession={onSelectSession}
+            featureList={featureList}
+            systemMode={systemMode}
+          />
+        )}
         {view === 'forecast' && <ForecastView session={selectedSession} onBack={() => setView('dashboard')} featureList={featureList}/>}
         {view === 'alerts' && <AlertsView/>}
         {view === 'live_logs' && <LiveLogsView/>}
         {view === 'explain' && <ExplainView featureList={featureList}/>}
         {view === 'reports' && <ReportsView/>}
         {view === 'ingest' && <IngestPanel/>}
-        {view === 'settings' && <SettingsView health={health}/>}
+        {view === 'settings' && (
+          <SettingsView
+            health={health}
+            systemMode={systemMode}
+            onToggleMode={handleToggleMode}
+            simulatorRunning={simulatorRunning}
+            onStartSimulator={handleStartSimulator}
+            onStopSimulator={handleStopSimulator}
+            onPurgeSimulated={handlePurgeSimulated}
+          />
+        )}
       </main>
 
       {/* ── Footer ── */}
@@ -297,17 +395,20 @@ function KillChainCompact({ currentStage }) {
 // ═══════════════════════════════════════════════════════════════
 // DASHBOARD — stats + sessions table with kill chain
 // ═══════════════════════════════════════════════════════════════
-function Dashboard({ onSelectSession }) {
+function Dashboard({ onSelectSession, systemMode }) {
   const [sessions, setSessions] = useState([]);
   const [stats, setStats] = useState({});
   const [alertStats, setAlertStats] = useState({});
   const [loading, setLoading] = useState(true);
   const [simBannerDismissed, setSimBannerDismissed] = useState(false);
   const [sortBy, setSortBy] = useState('last_seen');
+  const [filterSource, setFilterSource] = useState('all');
+  const activeFilter = systemMode === 'live' ? 'live' : filterSource;
 
   const refresh = useCallback(() => {
+    const srcParam = activeFilter !== 'all' ? `&source=${activeFilter}` : '';
     Promise.all([
-      apiFetch(`/sessions?limit=100&sort_by=${sortBy}`),
+      apiFetch(`/sessions?limit=100&sort_by=${sortBy}${srcParam}`),
       apiFetch('/dashboard/stats'),
       apiFetch('/alerts/stats'),
     ]).then(([s, st, as]) => {
@@ -316,7 +417,7 @@ function Dashboard({ onSelectSession }) {
       setAlertStats(as);
       setLoading(false);
     }).catch(() => setLoading(false));
-  }, [sortBy]);
+  }, [sortBy, activeFilter]);
 
   useEffect(() => {
     refresh();
@@ -382,6 +483,41 @@ function Dashboard({ onSelectSession }) {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Sessions table header bar with Source filter pills */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-2)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+          <span className="section-label" style={{ marginBottom: 0 }}>ACTIVE_SESSIONS</span>
+          <span className="mono text-sm" style={{ color: 'var(--text-muted)' }}>({sessions.length})</span>
+        </div>
+        <div style={{ display: 'inline-flex', gap: 4, background: 'var(--surface)', padding: 3, borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
+          <button
+            className={`btn btn-sm ${activeFilter === 'all' ? 'btn-primary' : ''}`}
+            onClick={() => setFilterSource('all')}
+            disabled={systemMode === 'live'}
+            title={systemMode === 'live' ? 'Locked in Live mode' : undefined}
+            style={{ fontSize: '0.62rem', padding: '2px 8px', opacity: systemMode === 'live' ? 0.5 : 1 }}
+          >
+            ALL
+          </button>
+          <button
+            className={`btn btn-sm ${activeFilter === 'live' ? 'btn-primary' : ''}`}
+            onClick={() => setFilterSource('live')}
+            style={{ fontSize: '0.62rem', padding: '2px 8px' }}
+          >
+            🟢 LIVE ONLY
+          </button>
+          <button
+            className={`btn btn-sm ${activeFilter === 'simulated' ? 'btn-primary' : ''}`}
+            onClick={() => setFilterSource('simulated')}
+            disabled={systemMode === 'live'}
+            title={systemMode === 'live' ? 'Locked in Live mode' : undefined}
+            style={{ fontSize: '0.62rem', padding: '2px 8px', opacity: systemMode === 'live' ? 0.5 : 1 }}
+          >
+            🟠 SIMULATED
+          </button>
+        </div>
       </div>
 
       {/* Sessions table */}
@@ -1117,9 +1253,101 @@ function ReportsView() {
 // ═══════════════════════════════════════════════════════════════
 // SETTINGS — model info, health, feature list
 // ═══════════════════════════════════════════════════════════════
-function SettingsView({ health }) {
+function SettingsView({
+  health,
+  systemMode,
+  onToggleMode,
+  simulatorRunning,
+  onStartSimulator,
+  onStopSimulator,
+  onPurgeSimulated,
+}) {
   return (
     <div className="settings-grid">
+      {/* ── Mode Control Card (Full width top) ── */}
+      <div className="panel" style={{
+        gridColumn: '1 / -1',
+        border: systemMode === 'live' ? '1px solid #27ae60' : '1px solid #e67e22',
+        background: systemMode === 'live' ? 'rgba(39, 174, 96, 0.03)' : 'rgba(230, 126, 34, 0.03)',
+      }}>
+        <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--sp-2)' }}>
+          <div>
+            <span className="panel-title">TRAFFIC_SOURCE_MODE</span>
+            <span className="panel-meta">Switch between real packet sniffing and synthetic attack simulator</span>
+          </div>
+          <button
+            className="btn btn-sm btn-primary"
+            onClick={() => onToggleMode?.(systemMode === 'live' ? 'simulated' : 'live')}
+            style={{
+              background: systemMode === 'live' ? '#e67e22' : '#27ae60',
+              borderColor: systemMode === 'live' ? '#d35400' : '#219653',
+            }}
+          >
+            SWITCH TO {systemMode === 'live' ? 'SIMULATION MODE' : 'LIVE ONLY MODE'}
+          </button>
+        </div>
+        <div className="panel-body">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 'var(--sp-3)', marginBottom: 'var(--sp-4)' }}>
+            <div style={{
+              padding: 'var(--sp-3)',
+              borderRadius: 'var(--radius)',
+              border: systemMode === 'live' ? '1.5px solid #27ae60' : '1px solid var(--border)',
+              background: systemMode === 'live' ? 'rgba(39, 174, 96, 0.08)' : 'var(--surface)',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 'var(--sp-1)' }}>
+                <Wifi size={14} color="#27ae60"/>
+                <strong style={{ fontSize: '0.78rem', color: '#27ae60' }}>🟢 LIVE ONLY MODE (Real Packets)</strong>
+              </div>
+              <p style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
+                Strict real capture mode. Only genuine packets intercepted off your network interface by <code>capture/live_capture.py</code> are processed.
+                Any simulated traffic sent to <code>/ingest</code> is <strong>rejected with HTTP 403 Forbidden</strong>.
+              </p>
+            </div>
+
+            <div style={{
+              padding: 'var(--sp-3)',
+              borderRadius: 'var(--radius)',
+              border: systemMode === 'simulated' ? '1.5px solid #e67e22' : '1px solid var(--border)',
+              background: systemMode === 'simulated' ? 'rgba(230, 126, 34, 0.08)' : 'var(--surface)',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 'var(--sp-1)' }}>
+                <FlaskConical size={14} color="#e67e22"/>
+                <strong style={{ fontSize: '0.78rem', color: '#e67e22' }}>🟠 SIMULATION MODE (Synthetic Lab)</strong>
+              </div>
+              <p style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
+                Demo and prototyping mode. Allows <code>demo/traffic_simulator.py</code> to inject multi-stage attack scenarios to demo kill-chain prediction without an isolated VM lab.
+              </p>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 'var(--sp-3)', borderTop: '1px solid var(--border)', flexWrap: 'wrap', gap: 'var(--sp-2)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+              <span className="mono text-sm">SIMULATOR_PROCESS:</span>
+              <span className="severity-badge" style={{
+                background: simulatorRunning ? 'rgba(39,174,96,0.15)' : 'rgba(138,127,114,0.15)',
+                color: simulatorRunning ? '#27ae60' : 'var(--text-muted)',
+              }}>
+                {simulatorRunning ? '● RUNNING' : '○ STOPPED'}
+              </span>
+              {systemMode === 'simulated' && (
+                simulatorRunning ? (
+                  <button className="btn btn-sm" onClick={onStopSimulator} style={{ color: 'var(--severity-critical)', borderColor: 'var(--severity-critical)' }}>
+                    ⏹ STOP SIMULATOR
+                  </button>
+                ) : (
+                  <button className="btn btn-sm" onClick={onStartSimulator}>
+                    ▶ START SIMULATOR
+                  </button>
+                )
+              )}
+            </div>
+            <button className="btn btn-sm" onClick={onPurgeSimulated} style={{ color: 'var(--severity-high)', borderColor: 'var(--border)' }}>
+              🗑 PURGE ALL SIMULATED DATA
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div className="panel">
         <div className="panel-header">
           <span className="panel-title">MODEL_INFO</span>

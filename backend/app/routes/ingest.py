@@ -25,6 +25,17 @@ async def ingest_flow(
     db: AsyncSession = Depends(get_db),
 ):
     """Ingest a single flow record."""
+    if getattr(flow, "source", None) == "simulated":
+        from .system import SystemState
+        if SystemState.mode == "live":
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Simulation traffic rejected: system is in LIVE-ONLY mode. "
+                    "Switch mode to 'Simulated' in Settings to allow synthetic flows."
+                ),
+            )
+
     try:
         result = await ingest_single_flow(flow, db)
         return result

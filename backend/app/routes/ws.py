@@ -5,6 +5,7 @@ BUG-01 fix: _active_connections and broadcast() moved to live.py to allow
 ingestion.py to import broadcast without a circular dependency.
 """
 import logging
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy import desc, func, select
@@ -23,24 +24,23 @@ router = APIRouter()
 
 @router.websocket("/ws/live")
 @router.websocket("/api/packets/ws")
-async def live_feed(websocket: WebSocket):
+async def websocket_live_feed(
+    websocket: WebSocket,
+    session_key: Optional[str] = Query(None),
+):
     """
-    WebSocket endpoint for live flow events.
-    Clients connect and receive real-time predictions/alerts as flows are ingested.
+    WebSocket endpoint for real-time flow events.
+    Clients can optionally filter by session_key (?session_key=...).
     """
     await websocket.accept()
     register(websocket)
-
     try:
         while True:
-            # Keep connection alive; client can send pings
-            data = await websocket.receive_text()
-            if data == "ping":
-                import json
-                await websocket.send_text(json.dumps({"type": "pong"}))
+            await websocket.receive_text()
     except WebSocketDisconnect:
-        pass
-    finally:
+        unregister(websocket)
+    except Exception as e:
+        logger.debug("WebSocket client disconnected: %s", e)
         unregister(websocket)
 
 
@@ -48,6 +48,7 @@ async def live_feed(websocket: WebSocket):
 async def get_sessions(
     limit: int = Query(50, ge=1, le=200),
     sort_by: str = Query("last_seen", description="Sort field: last_seen, latest_risk_score, flow_count"),
+    source: Optional[str] = Query(None, description="Filter by source: live, simulated, or all"),
     db: AsyncSession = Depends(get_db),
 ):
     """Get tracked sessions with their latest risk scores."""
@@ -57,7 +58,13 @@ async def get_sessions(
         "flow_count": desc(SessionDB.flow_count),
     }.get(sort_by, desc(SessionDB.last_seen))
 
-    stmt = select(SessionDB).order_by(sort_col).limit(limit)
+    stmt = select(SessionDB)
+    if source == "live":
+        stmt = stmt.where(SessionDB.source != "simulated")
+    elif source == "simulated":
+        stmt = stmt.where(SessionDB.source == "simulated")
+
+    stmt = stmt.order_by(sort_col).limit(limit)
     result = await db.execute(stmt)
     sessions = result.scalars().all()
 
