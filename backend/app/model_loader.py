@@ -3,17 +3,22 @@ Model loader — loads world_model.pt, scaler.pkl, config.json at startup.
 Fails loudly if anything is wrong. No silent fallbacks.
 """
 import json
-import pickle
 import logging
-from pathlib import Path
+import pickle
 
 import numpy as np
 import torch
 import torch.nn as nn
 
 from .config import (
-    MODEL_PATH, SCALER_PATH, CONFIG_PATH,
-    N_FEATURES, HIDDEN_SIZE, N_STAGES, STAGES, FLOW_FEATURES, WINDOW_SIZE,
+    CONFIG_PATH,
+    FLOW_FEATURES,
+    HIDDEN_SIZE,
+    MODEL_PATH,
+    N_FEATURES,
+    N_STAGES,
+    SCALER_PATH,
+    WINDOW_SIZE,
 )
 
 logger = logging.getLogger(__name__)

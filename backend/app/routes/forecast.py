@@ -1,9 +1,9 @@
-from fastapi import APIRouter, HTTPException
 import numpy as np
+from fastapi import APIRouter, HTTPException
 
-from ..schemas import ForecastRequest, ForecastResponse, ForecastStep
 from ..inference import forecast_rollout
 from ..model_loader import artifacts
+from ..schemas import ForecastRequest, ForecastResponse, ForecastStep
 
 router = APIRouter()
 

@@ -9,25 +9,28 @@ Fixes applied:
   §11A    — RFC1918-based traffic direction classification on session create
   §5 (KillChain flapping) — max_stage_reached is monotonic (never decreases)
 """
-import logging
 import ipaddress
-from datetime import datetime, timezone, timedelta
+import logging
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import numpy as np
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
 
-from .model_loader import artifacts
 from .config import (
-    FLOW_FEATURES, WINDOW_SIZE, DEFAULT_THRESHOLD,
-    SESSION_TIME_BUCKET_SECONDS, STAGES,
+    DEFAULT_THRESHOLD,
+    FLOW_FEATURES,
+    SESSION_TIME_BUCKET_SECONDS,
+    STAGES,
+    WINDOW_SIZE,
 )
-from .database import FlowRecordDB, SessionDB, AlertDB
+from .database import AlertDB, FlowRecordDB, SessionDB
 from .inference import predict_single
-from .schemas import FlowRecord
 from .live import broadcast  # BUG-01 fix
+from .model_loader import artifacts
+from .schemas import FlowRecord
 
 logger = logging.getLogger(__name__)
 

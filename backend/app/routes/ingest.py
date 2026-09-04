@@ -2,18 +2,18 @@
 POST /ingest — single flow record or CSV batch upload.
 Real ingestion: validate → scale → buffer → predict → alert.
 """
-import io
 import csv
+import io
 import logging
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..database import get_db
-from ..schemas import FlowRecord, IngestResponse
-from ..ingestion import ingest_single_flow, get_buffer_status
 from ..config import FLOW_FEATURES
+from ..database import get_db
+from ..ingestion import get_buffer_status, ingest_single_flow
+from ..schemas import FlowRecord, IngestResponse
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

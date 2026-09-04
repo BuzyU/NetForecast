@@ -8,14 +8,20 @@ Schema additions (from audit fixes):
   - SessionDB.direction     : "inbound" | "outbound" | "internal" (RFC1918 classification)
   - SessionDB.max_stage_reached : highest MITRE stage index seen (monotonic, never decreases)
 """
-from datetime import datetime, timezone
-from sqlalchemy import (
-    Column, Integer, String, Float, Boolean, DateTime, Text,
-    create_engine, event,
-)
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import DeclarativeBase
 import logging
+from datetime import datetime, timezone
+
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    Integer,
+    String,
+    Text,
+)
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase
 
 from .config import DATABASE_URL, DB_DIR
 

@@ -3,10 +3,19 @@ Pydantic request/response schemas.
 Every endpoint has explicit types — no untyped dicts flying around.
 """
 from __future__ import annotations
+
 from datetime import datetime
 from typing import Optional
+
 from pydantic import BaseModel, Field, field_validator
-from .config import N_FEATURES, WINDOW_SIZE, FLOW_FEATURES, DEFAULT_K_STEPS, DEFAULT_MC_SAMPLES
+
+from .config import (
+    DEFAULT_K_STEPS,
+    DEFAULT_MC_SAMPLES,
+    FLOW_FEATURES,
+    N_FEATURES,
+    WINDOW_SIZE,
+)
 
 
 # ── Flow record (single row of 22 features) ──────────────────────────

@@ -1,21 +1,30 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
-  ReferenceLine, ResponsiveContainer, BarChart, Bar, Cell,
+  ReferenceLine, ResponsiveContainer,
 } from 'recharts';
 import {
   Activity, AlertTriangle, Shield, Upload, Radio,
   Eye, ChevronRight, Check, MonitorDot, Database,
-  FileText, Zap, Settings, BarChart3, Terminal,
-  Cpu, Clock, Wifi, ArrowDownToLine, ArrowUpFromLine,
-  Network, FlaskConical, GitBranch,
+  Zap, Settings, BarChart3, Terminal,
+  Wifi, ArrowDownToLine, ArrowUpFromLine,
+  Network, FlaskConical,
 } from 'lucide-react';
 import { apiFetch, apiPost, apiUpload, createWebSocket } from './api';
 import {
   stageClass, stageColor, stageIndex, severityClass,
-  formatTime, formatDateTime, formatProb, formatDuration, STAGES,
+  formatTime, formatProb, formatDuration, STAGES,
 } from './utils';
 import './index.css';
+
+const DEFAULT_FEAT_ORDER = [
+  'flow_duration', 'tot_fwd_pkts', 'tot_bwd_pkts', 'fwd_pkt_len_mean',
+  'bwd_pkt_len_mean', 'flow_bytes_s', 'flow_pkts_s', 'flow_iat_mean',
+  'flow_iat_std', 'fwd_iat_mean', 'bwd_iat_mean', 'syn_flag_cnt',
+  'ack_flag_cnt', 'fin_flag_cnt', 'rst_flag_cnt', 'psh_flag_cnt',
+  'urg_flag_cnt', 'down_up_ratio', 'pkt_size_avg', 'ttl_variance',
+  'tcp_win_size', 'retransmit_cnt',
+];
 
 // ── Data source banner helpers ────────────────────────────────────────────
 const SOURCE_LABELS = {
@@ -452,45 +461,41 @@ function ForecastView({ session, onBack, featureList }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // BUG-08: build window using backend's feature ordering, fall back to hardcoded
-  const FEAT_ORDER = featureList || [
-    'flow_duration', 'tot_fwd_pkts', 'tot_bwd_pkts', 'fwd_pkt_len_mean',
-    'bwd_pkt_len_mean', 'flow_bytes_s', 'flow_pkts_s', 'flow_iat_mean',
-    'flow_iat_std', 'fwd_iat_mean', 'bwd_iat_mean', 'syn_flag_cnt',
-    'ack_flag_cnt', 'fin_flag_cnt', 'rst_flag_cnt', 'psh_flag_cnt',
-    'urg_flag_cnt', 'down_up_ratio', 'pkt_size_avg', 'ttl_variance',
-    'tcp_win_size', 'retransmit_cnt',
-  ];
+  const featOrder = featureList || DEFAULT_FEAT_ORDER;
 
   useEffect(() => {
     if (!session) return;
-    setLoading(true);
-    setError(null);
+    let active = true;
 
-    apiFetch(`/sessions/${encodeURIComponent(session.session_key)}/flows?limit=100`)
-      .then(allFlows => {
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const allFlows = await apiFetch(`/sessions/${encodeURIComponent(session.session_key)}/flows?limit=100`);
+        if (!active) return;
         setFlows(allFlows);
         if (allFlows.length < 6) {
           setError(`Need at least 6 flows for forecast, have ${allFlows.length}`);
           setLoading(false);
           return;
         }
-        const window = allFlows.slice(0, 6).reverse().map(f => FEAT_ORDER.map(k => f.features?.[k] ?? 0));
-
-        return Promise.all([
+        const window = allFlows.slice(0, 6).reverse().map(f => featOrder.map(k => f.features?.[k] ?? 0));
+        const [fc, exp] = await Promise.all([
           apiPost('/forecast', { window, k_steps: 6, n_mc_samples: 20, needs_scaling: true }),
           apiPost('/explain', { window, top_k: 10, needs_scaling: true }),
         ]);
-      })
-      .then(results => {
-        if (results) {
-          setForecast(results[0]);
-          setExplanation(results[1]);
-        }
-        setLoading(false);
-      })
-      .catch(e => { setError(e.message); setLoading(false); });
-  }, [session]);
+        if (!active) return;
+        setForecast(fc);
+        setExplanation(exp);
+      } catch (e) {
+        if (active) setError(e.message);
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+
+    return () => { active = false; };
+  }, [session, featOrder]);
 
   if (!session) {
     return (
@@ -897,14 +902,7 @@ function ExplainView({ featureList }) {
   const [explanation, setExplanation] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  const FEAT_ORDER = featureList || [
-    'flow_duration', 'tot_fwd_pkts', 'tot_bwd_pkts', 'fwd_pkt_len_mean',
-    'bwd_pkt_len_mean', 'flow_bytes_s', 'flow_pkts_s', 'flow_iat_mean',
-    'flow_iat_std', 'fwd_iat_mean', 'bwd_iat_mean', 'syn_flag_cnt',
-    'ack_flag_cnt', 'fin_flag_cnt', 'rst_flag_cnt', 'psh_flag_cnt',
-    'urg_flag_cnt', 'down_up_ratio', 'pkt_size_avg', 'ttl_variance',
-    'tcp_win_size', 'retransmit_cnt',
-  ];
+  const featOrder = featureList || DEFAULT_FEAT_ORDER;
 
   useEffect(() => {
     apiFetch('/sessions?limit=50').then(setSessions).catch(() => {});
@@ -916,11 +914,11 @@ function ExplainView({ featureList }) {
     apiFetch(`/sessions/${encodeURIComponent(session.session_key)}/flows?limit=6`)
       .then(flows => {
         if (flows.length < 6) throw new Error('Need 6+ flows');
-        const window = flows.slice(0, 6).reverse().map(f => FEAT_ORDER.map(k => f.features?.[k] ?? 0));
+        const window = flows.slice(0, 6).reverse().map(f => featOrder.map(k => f.features?.[k] ?? 0));
         return apiPost('/explain', { window, top_k: 22, needs_scaling: true });
       })
       .then(result => { setExplanation(result); setLoading(false); })
-      .catch(e => { setLoading(false); });
+      .catch(() => { setLoading(false); });
   };
 
   const maxImp = explanation?.attributions

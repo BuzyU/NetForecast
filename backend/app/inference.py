@@ -1,15 +1,19 @@
 import logging
-from typing import Optional
 
 import numpy as np
 import torch
 
-from .model_loader import artifacts, WorldModel
 from .config import (
-    STAGES, STAGE2ID, N_FEATURES, WINDOW_SIZE,
-    DEFAULT_K_STEPS, DEFAULT_MC_SAMPLES, DEFAULT_MC_NOISE_STD,
-    EMA_ALPHA, DEFAULT_THRESHOLD,
+    DEFAULT_K_STEPS,
+    DEFAULT_MC_NOISE_STD,
+    DEFAULT_MC_SAMPLES,
+    DEFAULT_THRESHOLD,
+    EMA_ALPHA,
+    N_FEATURES,
+    STAGES,
+    WINDOW_SIZE,
 )
+from .model_loader import artifacts
 
 logger = logging.getLogger(__name__)
 
@@ -146,8 +150,6 @@ def explain_window(window: np.ndarray, top_k: int = 10) -> dict:
     x.requires_grad_(True)
 
     next_state, inf_logit, stage_logits = model(x)
-    prob = torch.sigmoid(inf_logit).item()
-
     inf_logit.backward()
     grads = x.grad.detach().cpu().numpy()[0]
     input_vals = x.detach().cpu().numpy()[0]

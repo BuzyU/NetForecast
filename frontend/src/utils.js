@@ -1,4 +1,4 @@
-# ── Stage helpers ──────────────────────────────────────────────
+// ── Stage helpers ──────────────────────────────────────────────
 const STAGES = ['Benign', 'Reconnaissance', 'Initial Access', 'Lateral Movement', 'C2', 'Exfiltration'];
 
 export function stageIndex(stage) {

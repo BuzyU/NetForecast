@@ -4,12 +4,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .config import ALLOWED_ORIGINS, STAGES, N_FEATURES, ARTIFACTS_DIR, FLOW_FEATURES
-from .model_loader import artifacts
+from .config import ALLOWED_ORIGINS, ARTIFACTS_DIR, FLOW_FEATURES, N_FEATURES, STAGES
 from .database import init_db
+from .model_loader import artifacts
+from .routes import alerts, explain, forecast, ingest, predict, ws
 from .schemas import HealthResponse
-
-from .routes import predict, forecast, explain, alerts, ingest, ws
 
 logging.basicConfig(
     level=logging.INFO,

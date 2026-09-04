@@ -1,7 +1,7 @@
 """GET /alerts — real alert data from SQLite. POST /alerts/{id}/acknowledge."""
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, func, desc
 
 from ..database import AlertDB, get_db
 from ..schemas import AlertOut
@@ -50,11 +50,11 @@ async def alert_stats(db: AsyncSession = Depends(get_db)):
     """Summary counts for the dashboard header."""
     total = await db.execute(select(func.count(AlertDB.id)))
     unack = await db.execute(
-        select(func.count(AlertDB.id)).where(AlertDB.acknowledged == False)
+        select(func.count(AlertDB.id)).where(AlertDB.acknowledged.is_(False))
     )
     critical = await db.execute(
         select(func.count(AlertDB.id)).where(
-            AlertDB.severity == "critical", AlertDB.acknowledged == False
+            AlertDB.severity == "critical", AlertDB.acknowledged.is_(False)
         )
     )
     return {

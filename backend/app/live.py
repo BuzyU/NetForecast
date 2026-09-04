@@ -44,6 +44,6 @@ async def broadcast(event: dict):
             await ws.send_text(message)
         except Exception:
             disconnected.add(ws)
-    _active_connections -= disconnected
     if disconnected:
+        _active_connections.difference_update(disconnected)
         logger.debug("Pruned %d stale WebSocket connections", len(disconnected))

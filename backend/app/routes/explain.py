@@ -1,10 +1,10 @@
 """POST /explain — feature attribution for a prediction window."""
-from fastapi import APIRouter, HTTPException
 import numpy as np
+from fastapi import APIRouter, HTTPException
 
-from ..schemas import ExplainRequest, ExplainResponse, FeatureAttribution
 from ..inference import explain_window
 from ..model_loader import artifacts
+from ..schemas import ExplainRequest, ExplainResponse, FeatureAttribution
 
 router = APIRouter()
 

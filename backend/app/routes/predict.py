@@ -1,10 +1,10 @@
 """POST /predict — single-step prediction from a pre-scaled window."""
-from fastapi import APIRouter, HTTPException
 import numpy as np
+from fastapi import APIRouter, HTTPException
 
-from ..schemas import PredictRequest, PredictResponse
 from ..inference import predict_single
 from ..model_loader import artifacts
+from ..schemas import PredictRequest, PredictResponse
 
 router = APIRouter()
 
