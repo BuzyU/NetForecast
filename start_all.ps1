@@ -8,7 +8,7 @@ param (
     [string]$Interface = ""
 )
 
-$ROOT = if ($PSScriptRoot) { $PSScriptRoot } else { "C:\Users\umerz\OneDrive\Desktop\Network_Attack_Detection" }
+$ROOT = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Item -LiteralPath .).FullName }
 $PYTHON = "$ROOT\backend\venv\Scripts\python.exe"
 
 Write-Host "========================================" -ForegroundColor Cyan

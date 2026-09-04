@@ -1,37 +1,21 @@
 """
 WebSocket /ws/live — real-time flow feed + sessions list endpoint.
+
+BUG-01 fix: _active_connections and broadcast() moved to live.py to allow
+ingestion.py to import broadcast without a circular dependency.
 """
-import json
-import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Set
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, func
 
 from ..database import get_db, SessionDB, FlowRecordDB
+from ..live import register, unregister, broadcast  # noqa: F401 (re-exported for convenience)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-# Active WebSocket connections
-_active_connections: Set[WebSocket] = set()
-
-
-async def broadcast(event: dict):
-    """Broadcast an event to all connected WebSocket clients."""
-    if not _active_connections:
-        return
-    message = json.dumps(event, default=str)
-    disconnected = set()
-    for ws in _active_connections:
-        try:
-            await ws.send_text(message)
-        except Exception:
-            disconnected.add(ws)
-    _active_connections -= disconnected
 
 
 @router.websocket("/ws/live")
@@ -42,20 +26,19 @@ async def live_feed(websocket: WebSocket):
     Clients connect and receive real-time predictions/alerts as flows are ingested.
     """
     await websocket.accept()
-    _active_connections.add(websocket)
-    logger.info("WebSocket client connected (%d total)", len(_active_connections))
+    register(websocket)
 
     try:
         while True:
             # Keep connection alive; client can send pings
             data = await websocket.receive_text()
             if data == "ping":
+                import json
                 await websocket.send_text(json.dumps({"type": "pong"}))
     except WebSocketDisconnect:
         pass
     finally:
-        _active_connections.discard(websocket)
-        logger.info("WebSocket client disconnected (%d remaining)", len(_active_connections))
+        unregister(websocket)
 
 
 @router.get("/sessions")
@@ -84,6 +67,9 @@ async def get_sessions(
             "flow_count": s.flow_count,
             "latest_risk_score": s.latest_risk_score,
             "latest_stage": s.latest_stage,
+            "max_stage_reached": s.max_stage_reached,
+            "direction": s.direction,
+            "source": s.source,
             "first_seen": s.first_seen.isoformat() if s.first_seen else None,
             "last_seen": s.last_seen.isoformat() if s.last_seen else None,
         }
@@ -115,6 +101,7 @@ async def get_session_flows(
             "features": {feat: getattr(f, feat) for feat in FLOW_FEATURES},
             "infiltration_prob": f.infiltration_prob,
             "predicted_stage": f.predicted_stage,
+            "source": f.source,
         }
         for f in flows
     ]
@@ -131,10 +118,33 @@ async def dashboard_stats(db: AsyncSession = Depends(get_db)):
         )
     )
 
+    # Check if any simulated data is present (§7 — data-provenance labeling)
+    sim_count = await db.execute(
+        select(func.count(SessionDB.id)).where(SessionDB.source == "simulated")
+    )
+    has_simulated = (sim_count.scalar() or 0) > 0
+
+    # Direction breakdown
+    inbound_count = await db.execute(
+        select(func.count(SessionDB.id)).where(SessionDB.direction == "inbound")
+    )
+    outbound_count = await db.execute(
+        select(func.count(SessionDB.id)).where(SessionDB.direction == "outbound")
+    )
+    internal_count = await db.execute(
+        select(func.count(SessionDB.id)).where(SessionDB.direction == "internal")
+    )
+
     return {
         "total_sessions": total_sessions.scalar() or 0,
         "total_flows": total_flows.scalar() or 0,
         "at_risk_sessions": active_alerts.scalar() or 0,
+        "has_simulated_data": has_simulated,
+        "direction_breakdown": {
+            "inbound": inbound_count.scalar() or 0,
+            "outbound": outbound_count.scalar() or 0,
+            "internal": internal_count.scalar() or 0,
+        },
     }
 
 
@@ -153,4 +163,3 @@ async def stage_distribution(db: AsyncSession = Depends(get_db)):
     result = await db.execute(stmt)
     rows = result.all()
     return [{"stage": row[0], "count": row[1]} for row in rows]
-

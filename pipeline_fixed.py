@@ -54,6 +54,33 @@ WINDOW = 6
 
 
 def generate_synthetic_flows(n_sessions=400, session_len=30):
+    """
+    Generate synthetic flow sessions with REALISTIC CIC-IDS-scale feature magnitudes.
+
+    BUG-01a fix: the original generator used np.random.normal(0, 1) base values,
+    producing a scaler with mean≈0 and scale≈1 that is incompatible with real
+    traffic (flow_duration in 10k-100k µs, tcp_win_size up to 65535, etc.).
+
+    These profiles match traffic_simulator.py's STAGE_PROFILES so that the
+    scaler trained here will correctly normalise both simulated and live-captured flows.
+    """
+    # (mean, std) per feature per stage — realistic CIC-IDS magnitudes
+    PROFILES = {
+        "Benign": [50000, 10, 8, 200, 180, 5000, 20, 50000, 30000, 60000, 70000, 1, 5, 1, 0, 2, 0, 1.0, 400, 5, 8192, 0],
+        "Reconnaissance": [5000, 50, 2, 60, 20, 15000, 120, 3000, 2000, 4000, 8000, 8, 2, 0, 2, 1, 0, 0.2, 80, 3, 1024, 1],
+        "Initial Access": [30000, 15, 10, 150, 120, 8000, 40, 20000, 15000, 25000, 30000, 2, 8, 2, 1, 6, 0, 0.8, 300, 4, 8192, 3],
+        "Lateral Movement": [40000, 20, 18, 180, 200, 10000, 35, 30000, 20000, 35000, 40000, 1, 10, 1, 0, 4, 0, 2.5, 350, 6, 16384, 1],
+        "C2": [80000, 8, 6, 100, 90, 3000, 15, 90000, 5000, 95000, 95000, 0, 12, 0, 0, 2, 0, 1.1, 200, 2, 8192, 0],
+        "Exfiltration": [120000, 5, 30, 200, 1200, 80000, 25, 40000, 30000, 45000, 42000, 0, 15, 2, 0, 3, 0, 0.3, 1100, 2, 65535, 3],
+    }
+    STDS = {
+        "Benign":         [30000, 8,  6,  150, 120, 4000, 15, 40000, 25000, 50000, 55000, 0.5, 3,  0.5, 0.2, 1.5, 0.1, 0.3, 200, 3, 4000, 0.2],
+        "Reconnaissance": [3000,  30, 1,  40,  15,  8000, 60, 2000,  1500,  3000,  5000,  4,   1,  0.2, 1,   0.5, 0.1, 0.1, 40,  2, 500,  0.5],
+        "Initial Access": [10000, 8,  6,  80,  60,  4000, 20, 10000, 8000,  12000, 15000, 1,   4,  1,   0.5, 3,   0.1, 0.3, 150, 2, 4000, 1.5],
+        "Lateral Movement":[15000, 10, 8,  80,  80,  5000, 15, 15000, 10000, 18000, 20000, 0.5, 5,  0.5, 0.2, 2,   0.1, 0.5, 150, 3, 8000, 0.5],
+        "C2":             [20000, 4,  3,  50,  45,  1500, 8,  10000, 2000,  12000, 12000, 0.2, 5,  0.1, 0.1, 1,   0.1, 0.2, 80,  1, 4000, 0.2],
+        "Exfiltration":   [40000, 3,  15, 100, 400, 30000, 10, 20000, 15000, 22000, 20000, 0.2, 6,  1,   0.2, 1.5, 0.1, 0.1, 400, 1, 10000, 1.5],
+    }
     rows = []
     for sid in range(n_sessions):
         is_attack_session = random.random() < 0.4
@@ -69,22 +96,9 @@ def generate_synthetic_flows(n_sessions=400, session_len=30):
             stage_sequence = ["Benign"] * session_len
         stage_sequence = (stage_sequence * (session_len // max(1, len(stage_sequence)) + 1))[:session_len]
         for t, stage in enumerate(stage_sequence):
-            base = np.random.normal(0, 1, len(FLOW_FEATURES))
-            if stage == "Reconnaissance":
-                base[FLOW_FEATURES.index("syn_flag_cnt")] += 4
-                base[FLOW_FEATURES.index("flow_pkts_s")] += 3
-            elif stage == "Initial Access":
-                base[FLOW_FEATURES.index("psh_flag_cnt")] += 3
-                base[FLOW_FEATURES.index("retransmit_cnt")] += 2
-            elif stage == "Lateral Movement":
-                base[FLOW_FEATURES.index("down_up_ratio")] += 2
-                base[FLOW_FEATURES.index("tot_fwd_pkts")] += 2
-            elif stage == "C2":
-                base[FLOW_FEATURES.index("flow_iat_std")] += 3
-                base[FLOW_FEATURES.index("ack_flag_cnt")] += 2
-            elif stage == "Exfiltration":
-                base[FLOW_FEATURES.index("flow_bytes_s")] += 5
-                base[FLOW_FEATURES.index("bwd_pkt_len_mean")] += 4
+            means = np.array(PROFILES[stage], dtype=np.float64)
+            stds  = np.array(STDS[stage],    dtype=np.float64)
+            base  = np.maximum(0, np.random.normal(means, stds))  # non-negative
             row = dict(zip(FLOW_FEATURES, base))
             row["session_id"] = sid
             row["timestamp"] = t0 + pd.Timedelta(seconds=t * 2)
@@ -226,18 +240,34 @@ def main():
         print("No --data provided or file not found — generating synthetic flow sessions.")
         df = generate_synthetic_flows()
 
+    data_source = args.data if (args.data and os.path.exists(args.data)) else "synthetic"
     print("Dataset shape:", df.shape)
 
+    # ── LEAKAGE FIX 1: split by session_id BEFORE scaling ──────────────
+    # Previously: scaler.fit_transform(all data) → train_test_split(windows)
+    # Problem: test-set values influenced scaler's mean/std; overlapping windows
+    #          from the same session split across train/test.
+    # Fix: split unique session IDs first, fit scaler ONLY on train sessions.
+    unique_sids = df["session_id"].unique()
+    train_sids, test_sids = train_test_split(unique_sids, test_size=0.2, random_state=SEED)
+    train_mask = df["session_id"].isin(train_sids)
+    train_df = df[train_mask].copy()
+    test_df  = df[~train_mask].copy()
+
     scaler = StandardScaler()
-    df[FLOW_FEATURES] = scaler.fit_transform(df[FLOW_FEATURES])
-    df["stage_id"] = df["stage_label"].map(STAGE2ID)
-    df_sorted = df.sort_values(["session_id", "timestamp"]).reset_index(drop=True)
+    train_df[FLOW_FEATURES] = scaler.fit_transform(train_df[FLOW_FEATURES])   # fit on train only
+    test_df[FLOW_FEATURES]  = scaler.transform(test_df[FLOW_FEATURES])        # transform only
 
-    X_seq, y_next, y_mal, y_stage = build_sequences(df_sorted)
-    print("Sequence tensor shapes:", X_seq.shape)
+    train_df["stage_id"] = train_df["stage_label"].map(STAGE2ID)
+    test_df["stage_id"]  = test_df["stage_label"].map(STAGE2ID)
 
-    X_train, X_test, yn_train, yn_test, ym_train, ym_test, ys_train, ys_test = train_test_split(
-        X_seq, y_next, y_mal, y_stage, test_size=0.2, random_state=SEED, stratify=y_mal)
+    train_sorted = train_df.sort_values(["session_id", "timestamp"]).reset_index(drop=True)
+    test_sorted  = test_df.sort_values(["session_id", "timestamp"]).reset_index(drop=True)
+
+    X_train, yn_train, ym_train, ys_train = build_sequences(train_sorted)
+    X_test,  yn_test,  ym_test,  ys_test  = build_sequences(test_sorted)
+    print(f"Train sequences: {X_train.shape}  Test sequences: {X_test.shape}")
+
 
     X_train_flat = X_train.reshape(X_train.shape[0], -1)
     X_test_flat = X_test.reshape(X_test.shape[0], -1)
@@ -282,8 +312,8 @@ def main():
     comparison.to_csv(f"{out_dir}/benchmark_comparison.csv")
 
     # FIX 2 applied: curated demo session instead of np.argmax(ym_test)
-    demo_sid = pick_demo_session(df_sorted)
-    demo_session = df_sorted[df_sorted["session_id"] == demo_sid]
+    demo_sid = pick_demo_session(train_sorted)
+    demo_session = train_sorted[train_sorted["session_id"] == demo_sid]
     demo_feats = demo_session[FLOW_FEATURES].values
     if len(demo_feats) >= WINDOW:
         initial_window = demo_feats[:WINDOW]
@@ -299,8 +329,30 @@ def main():
     torch.save(model.state_dict(), f"{out_dir}/world_model.pt")
     with open(f"{out_dir}/scaler.pkl", "wb") as f:
         pickle.dump(scaler, f)
+
+    # Add provenance metadata so anyone loading the artifacts knows their origin (§7/§9)
+    import subprocess, hashlib
+    try:
+        git_commit = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL
+        ).decode().strip()
+    except Exception:
+        git_commit = "unknown"
     with open(f"{out_dir}/config.json", "w") as f:
-        json.dump({"window": WINDOW, "features": FLOW_FEATURES, "stages": STAGES}, f, indent=2)
+        json.dump({
+            "window": WINDOW,
+            "features": FLOW_FEATURES,
+            "stages": STAGES,
+            "provenance": {
+                "trained_on": data_source,
+                "train_sessions": int(len(train_sids)),
+                "test_sessions": int(len(test_sids)),
+                "train_rows": int(len(train_df)),
+                "test_rows": int(len(test_df)),
+                "git_commit": git_commit,
+                "leakage_fix": "session-level split, scaler fit on train only",
+            }
+        }, f, indent=2)
 
     print("DONE — all artifacts saved to", out_dir)
 

@@ -271,6 +271,7 @@ def run_attack_scenario(api_url: str, speed: float, session_count: int):
                 flow["src_ip"] = session["src_ip"]
                 flow["dst_ip"] = session["dst_ip"]
                 flow["timestamp"] = datetime.now(timezone.utc).isoformat()
+                flow["source"] = "simulated"  # §7 provenance tag
 
                 try:
                     resp = requests.post(

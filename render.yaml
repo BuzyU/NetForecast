@@ -16,6 +16,11 @@ services:
         value: /opt/render/project/src/backend/data
       - key: ALERT_THRESHOLD
         value: "0.5"
+      # BUG-05 fix: set FRONTEND_URL to your Vercel deployment URL so CORS passes.
+      # Comma-separate multiple URLs if needed (e.g., preview + production).
+      # Example: https://netforecast.vercel.app,https://netforecast-preview.vercel.app
+      - key: FRONTEND_URL
+        value: "https://netforecast.vercel.app"
     disk:
       name: sqlite-data
       mountPath: /opt/render/project/src/backend/data

@@ -1,4 +1,4 @@
-// ── Stage helpers ──────────────────────────────────────────────
+# ── Stage helpers ──────────────────────────────────────────────
 const STAGES = ['Benign', 'Reconnaissance', 'Initial Access', 'Lateral Movement', 'C2', 'Exfiltration'];
 
 export function stageIndex(stage) {
@@ -68,8 +68,11 @@ export function formatBytes(bytes) {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
-export function formatDuration(ms) {
-  if (ms == null) return '\u2014';
+// flow_duration is stored in MICROSECONDS (live_capture.py: duration_us = ... * 1e6)
+// BUG-09b fix: was incorrectly treating input as milliseconds — divide by 1000 first
+export function formatDuration(us) {
+  if (us == null) return '\u2014';
+  const ms = us / 1000;           // microseconds → milliseconds
   if (ms < 1000) return ms.toFixed(0) + 'ms';
   if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
   return (ms / 60000).toFixed(1) + 'm';

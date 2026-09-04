@@ -1,6 +1,12 @@
 """
 SQLite database models — real persistence, not in-memory mock arrays.
 Uses SQLAlchemy async with aiosqlite.
+
+Schema additions (from audit fixes):
+  - FlowRecordDB.source     : "live_capture" | "simulated" | "csv_upload" | "api"
+  - SessionDB.source        : same, from first flow in the session
+  - SessionDB.direction     : "inbound" | "outbound" | "internal" (RFC1918 classification)
+  - SessionDB.max_stage_reached : highest MITRE stage index seen (monotonic, never decreases)
 """
 from datetime import datetime, timezone
 from sqlalchemy import (
@@ -28,6 +34,9 @@ class FlowRecordDB(Base):
     src_ip = Column(String(45), nullable=True)
     dst_ip = Column(String(45), nullable=True)
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    # Data provenance tag (§7 — simulation vs live vs upload)
+    source = Column(String(32), nullable=True, default="api")
 
     # All 22 features (stored raw, pre-scaling)
     flow_duration = Column(Float)
@@ -68,6 +77,16 @@ class SessionDB(Base):
     flow_count = Column(Integer, default=0)
     latest_risk_score = Column(Float, default=0.0)
     latest_stage = Column(String(32), default="Benign")
+
+    # Monotonic furthest stage (never moves backward — BUG fix for kill-chain flapping)
+    max_stage_reached = Column(String(32), default="Benign")
+
+    # Traffic direction classification (§11A, §12 — RFC1918 based)
+    direction = Column(String(16), default="unknown")  # "inbound"|"outbound"|"internal"|"unknown"
+
+    # Data provenance (§7)
+    source = Column(String(32), nullable=True, default="api")
+
     first_seen = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     last_seen = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 

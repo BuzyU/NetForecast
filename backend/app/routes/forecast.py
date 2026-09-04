@@ -1,4 +1,3 @@
-"""POST /forecast — k-step Monte Carlo rollout with EMA smoothing."""
 from fastapi import APIRouter, HTTPException
 import numpy as np
 

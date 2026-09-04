@@ -43,12 +43,20 @@ DEFAULT_MC_NOISE_STD = 0.05
 EMA_ALPHA = 0.4
 
 # ── CORS (Vercel frontend + local dev) ────────────────────────────────
-ALLOWED_ORIGINS = [
+# BUG-05 fix: parse FRONTEND_URL as a comma-separated list so multiple
+# Vercel preview URLs (or a staging + prod URL) can be allowed without
+# redeploying the backend. Set in Render dashboard or render.yaml envVars.
+_extra_origins = [
+    url.strip()
+    for url in os.environ.get("FRONTEND_URL", "").split(",")
+    if url.strip()
+]
+ALLOWED_ORIGINS = list({
     "http://localhost:5173",
     "http://localhost:3000",
     "http://127.0.0.1:5173",
-    os.environ.get("FRONTEND_URL", "http://localhost:5173"),
-]
+    *_extra_origins,
+})
 
 # ── Session grouping ──────────────────────────────────────────────────
 SESSION_TIME_BUCKET_SECONDS = 300  # 5 minutes

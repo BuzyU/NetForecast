@@ -31,5 +31,14 @@
     "Lateral Movement",
     "C2",
     "Exfiltration"
-  ]
+  ],
+  "provenance": {
+    "trained_on": "synthetic",
+    "train_sessions": 320,
+    "test_sessions": 80,
+    "train_rows": 9600,
+    "test_rows": 2400,
+    "git_commit": "95d905d",
+    "leakage_fix": "session-level split, scaler fit on train only"
+  }
 }

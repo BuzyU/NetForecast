@@ -1,27 +1,3 @@
-"""
-Real Packet Capture → Flow Feature Extraction → Model Prediction Pipeline
-
-This captures REAL network packets (live or from pcap), groups them into
-bidirectional flows, computes the 22 CIC-IDS features your model expects,
-and feeds them to the backend API for real-time prediction.
-
-This is NOT a simulator. It processes actual network traffic.
-
-Usage:
-  # Live capture on your network interface (requires admin/root)
-  python live_capture.py --interface "Ethernet" --api http://localhost:8000
-
-  # Process a pcap file (e.g., from CIC-IDS2017 dataset)
-  python live_capture.py --pcap path/to/capture.pcap --api http://localhost:8000
-
-  # List available interfaces
-  python live_capture.py --list-interfaces
-
-Requirements:
-  pip install scapy requests numpy
-  On Windows: also install Npcap (https://npcap.com/#download)
-  Run as Administrator for live capture.
-"""
 import argparse
 import sys
 import time
@@ -35,7 +11,6 @@ from typing import Optional
 import numpy as np
 import requests
 
-# Prevent Windows cp1252 console encoding crashes
 if sys.platform == "win32":
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -61,21 +36,17 @@ except ImportError:
     sys.exit(1)
 
 
-# ── Flow state tracker ───────────────────────────────────────────────
-
 @dataclass
 class FlowState:
-    """Tracks packet-level state for a single bidirectional flow."""
     src_ip: str
     dst_ip: str
     src_port: int = 0
     dst_port: int = 0
-    protocol: int = 6  # TCP default
+    protocol: int = 6
 
     start_time: float = 0.0
     last_time: float = 0.0
 
-    # Forward = src→dst, Backward = dst→src
     fwd_packets: int = 0
     bwd_packets: int = 0
     fwd_bytes: int = 0
@@ -84,7 +55,6 @@ class FlowState:
     fwd_pkt_lengths: list = field(default_factory=list)
     bwd_pkt_lengths: list = field(default_factory=list)
 
-    # Inter-arrival times
     fwd_iats: list = field(default_factory=list)
     bwd_iats: list = field(default_factory=list)
     flow_iats: list = field(default_factory=list)
@@ -93,7 +63,6 @@ class FlowState:
     last_bwd_time: float = 0.0
     last_pkt_time: float = 0.0
 
-    # TCP flags
     syn_count: int = 0
     ack_count: int = 0
     fin_count: int = 0
@@ -101,13 +70,10 @@ class FlowState:
     psh_count: int = 0
     urg_count: int = 0
 
-    # TTL values for variance calculation
     ttl_values: list = field(default_factory=list)
 
-    # TCP window sizes
     tcp_win_sizes: list = field(default_factory=list)
 
-    # Retransmissions (simplified: track seq numbers)
     _seen_seqs: set = field(default_factory=set)
     retransmit_count: int = 0
 
@@ -116,7 +82,6 @@ class FlowState:
     def add_packet(self, pkt_len: int, is_forward: bool, timestamp: float,
                    tcp_flags: int = 0, ttl: int = 64, tcp_win: int = 0,
                    seq: int = 0):
-        """Process a single packet belonging to this flow."""
         if self.packet_count == 0:
             self.start_time = timestamp
             self.last_pkt_time = timestamp
@@ -126,9 +91,8 @@ class FlowState:
         self.last_time = timestamp
         self.packet_count += 1
 
-        # Inter-arrival time (flow-level)
         if self.packet_count > 1:
-            iat = (timestamp - self.last_pkt_time) * 1e6  # microseconds
+            iat = (timestamp - self.last_pkt_time) * 1e6
             self.flow_iats.append(iat)
         self.last_pkt_time = timestamp
 
@@ -149,29 +113,25 @@ class FlowState:
                 self.bwd_iats.append(iat)
             self.last_bwd_time = timestamp
 
-        # TCP flags
         if tcp_flags:
-            if tcp_flags & 0x02:  # SYN
+            if tcp_flags & 0x02:
                 self.syn_count += 1
-            if tcp_flags & 0x10:  # ACK
+            if tcp_flags & 0x10:
                 self.ack_count += 1
-            if tcp_flags & 0x01:  # FIN
+            if tcp_flags & 0x01:
                 self.fin_count += 1
-            if tcp_flags & 0x04:  # RST
+            if tcp_flags & 0x04:
                 self.rst_count += 1
-            if tcp_flags & 0x08:  # PSH
+            if tcp_flags & 0x08:
                 self.psh_count += 1
-            if tcp_flags & 0x20:  # URG
+            if tcp_flags & 0x20:
                 self.urg_count += 1
 
-        # TTL
         self.ttl_values.append(ttl)
 
-        # TCP window
         if tcp_win > 0:
             self.tcp_win_sizes.append(tcp_win)
 
-        # Retransmission detection (simplified)
         if seq > 0:
             if seq in self._seen_seqs:
                 self.retransmit_count += 1
@@ -179,10 +139,6 @@ class FlowState:
                 self._seen_seqs.add(seq)
 
     def to_features(self) -> dict:
-        """
-        Compute the 22 CIC-IDS features from accumulated packet data.
-        These are the REAL features, derived from actual packets.
-        """
         duration_us = (self.last_time - self.start_time) * 1e6 if self.last_time > self.start_time else 1.0
         total_bytes = self.fwd_bytes + self.bwd_bytes
         total_pkts = self.fwd_packets + self.bwd_packets
@@ -214,18 +170,12 @@ class FlowState:
 
 
 class FlowExtractor:
-    """
-    Groups packets into bidirectional flows and extracts CIC-IDS features.
-    A flow is defined by the 5-tuple: (src_ip, dst_ip, src_port, dst_port, protocol).
-    Flows are exported when they reach a timeout or packet threshold.
-    """
-
     def __init__(self, api_url: str, flow_timeout: float = 30.0,
                  min_packets: int = 4, export_interval: int = 10):
         self.api_url = api_url
-        self.flow_timeout = flow_timeout  # seconds of inactivity before export
-        self.min_packets = min_packets    # minimum packets to consider a valid flow
-        self.export_interval = export_interval  # export every N new flows
+        self.flow_timeout = flow_timeout
+        self.min_packets = min_packets
+        self.export_interval = export_interval
 
         self.active_flows: dict[str, FlowState] = {}
         self.exported_count = 0
@@ -234,10 +184,6 @@ class FlowExtractor:
 
     def _flow_key(self, src_ip: str, dst_ip: str, src_port: int,
                   dst_port: int, proto: int) -> tuple[str, bool]:
-        """
-        Create a canonical flow key (sorted IPs so both directions match).
-        Returns (key, is_forward).
-        """
         if (src_ip, src_port) <= (dst_ip, dst_port):
             key = f"{src_ip}:{src_port}-{dst_ip}:{dst_port}-{proto}"
             return key, True
@@ -246,7 +192,6 @@ class FlowExtractor:
             return key, False
 
     def process_packet(self, pkt):
-        """Process a single packet from live capture or pcap."""
         self.total_packets += 1
 
         if not pkt.haslayer(IP):
@@ -281,7 +226,6 @@ class FlowExtractor:
 
         flow_key, is_forward = self._flow_key(src_ip, dst_ip, src_port, dst_port, proto)
 
-        # Create or update flow
         if flow_key not in self.active_flows:
             self.active_flows[flow_key] = FlowState(
                 src_ip=src_ip if is_forward else dst_ip,
@@ -301,7 +245,6 @@ class FlowExtractor:
             seq=seq,
         )
 
-        # Check for expired flows: every 25 packets OR every 3 seconds
         now = time.time()
         last_check = getattr(self, "_last_export_check", 0.0)
         if (self.total_packets % 25 == 0) or (now - last_check >= 3.0):
@@ -309,19 +252,16 @@ class FlowExtractor:
             self._export_expired_flows(now)
 
     def _export_expired_flows(self, current_time: float):
-        """Export flows that have been idle beyond the timeout or terminated."""
         expired_keys = []
         stale_keys = []
 
         for key, flow in self.active_flows.items():
             idle_time = current_time - flow.last_time
-            # Terminated TCP flow (FIN or RST) can be exported sooner (1s idle)
             is_terminated = (flow.fin_count > 0 or flow.rst_count > 0) and idle_time >= 1.0
 
             if (idle_time > self.flow_timeout or is_terminated) and flow.packet_count >= self.min_packets:
                 expired_keys.append(key)
             elif idle_time > (self.flow_timeout * 2):
-                # Stale flow with fewer than min_packets: clean up to avoid memory leak
                 stale_keys.append(key)
 
         for key in expired_keys:
@@ -332,11 +272,11 @@ class FlowExtractor:
             self.active_flows.pop(key, None)
 
     def _send_to_api(self, flow: FlowState):
-        """Send extracted flow features to the backend API."""
         features = flow.to_features()
         features["src_ip"] = flow.src_ip
         features["dst_ip"] = flow.dst_ip
         features["timestamp"] = datetime.now(timezone.utc).isoformat()
+        features["source"] = "live_capture"  # §7 provenance tag
 
         try:
             resp = requests.post(
@@ -379,7 +319,6 @@ class FlowExtractor:
             logger.error("Error sending flow: %s", e)
 
     def export_all_remaining(self):
-        """Export all remaining active flows (call at end of capture)."""
         logger.info("Exporting %d remaining active flows...", len(self.active_flows))
         for key in list(self.active_flows.keys()):
             flow = self.active_flows.pop(key)
@@ -397,14 +336,9 @@ class FlowExtractor:
 
 
 def get_network_interfaces():
-    """
-    Discover network interfaces with friendly names, descriptions, and IPv4 addresses.
-    Returns (interfaces_list, active_ip).
-    """
     interfaces = []
     active_ip = None
 
-    # Determine default outbound IPv4 via route check
     try:
         import socket
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -414,7 +348,6 @@ def get_network_interfaces():
     except Exception:
         pass
 
-    # Inspect Scapy's conf.ifaces
     try:
         for k, iface in conf.ifaces.items():
             name = getattr(iface, "name", str(k))
@@ -422,7 +355,6 @@ def get_network_interfaces():
             ip = getattr(iface, "ip", "")
             ip_str = str(ip) if ip else ""
 
-            # Filter loopback and WAN virtual noise
             if ip_str.startswith("127.") or "loopback" in name.lower() or "loopback" in desc.lower():
                 continue
 
@@ -439,7 +371,6 @@ def get_network_interfaces():
     except Exception:
         pass
 
-    # If no interfaces parsed from Scapy but we have active_ip
     if not interfaces and active_ip:
         interfaces.append({
             "name": "Default Interface",
@@ -454,7 +385,6 @@ def get_network_interfaces():
 
 
 def list_interfaces():
-    """List available network interfaces in a clean, readable format."""
     interfaces, active_ip = get_network_interfaces()
     print("\nAvailable Network Interfaces:")
     print("=" * 80)
@@ -471,13 +401,8 @@ def list_interfaces():
 
 
 def resolve_interface(interface_arg: Optional[str] = None) -> dict:
-    """
-    Resolve requested interface name to an interface dict with valid IP and Scapy handle.
-    Falls back gracefully if requested interface is disconnected.
-    """
     interfaces, active_ip = get_network_interfaces()
 
-    # Find the primary active interface
     active_iface = None
     for iface in interfaces:
         if iface["is_active"]:
@@ -485,13 +410,11 @@ def resolve_interface(interface_arg: Optional[str] = None) -> dict:
             break
 
     if not active_iface and interfaces:
-        # Pick first with a valid non-link-local IP
         for iface in interfaces:
             if iface["ip"] and not iface["ip"].startswith("169.254."):
                 active_iface = iface
                 break
 
-    # If user didn't specify or passed 'auto'
     if not interface_arg or interface_arg.lower() in ("auto", "default"):
         if active_iface:
             logger.info("Auto-selected active interface: %s (%s - %s)",
@@ -504,7 +427,6 @@ def resolve_interface(interface_arg: Optional[str] = None) -> dict:
 
     target = interface_arg.strip().lower()
 
-    # Search for requested interface by name, description, ip, or scapy_key
     matched = None
     for iface in interfaces:
         if (target == iface["name"].lower() or
@@ -516,7 +438,6 @@ def resolve_interface(interface_arg: Optional[str] = None) -> dict:
             break
 
     if matched:
-        # Check if matched interface is actually connected
         if not matched["ip"] or matched["ip"].startswith("169.254."):
             if active_iface:
                 logger.warning(
@@ -527,7 +448,6 @@ def resolve_interface(interface_arg: Optional[str] = None) -> dict:
                 return active_iface
         return matched
 
-    # Interface not matched by name
     if active_iface:
         logger.warning(
             "Interface '%s' not recognized. Falling back to active adapter: '%s' (%s)",
@@ -535,12 +455,10 @@ def resolve_interface(interface_arg: Optional[str] = None) -> dict:
         )
         return active_iface
 
-    # Default fallback
     return {"name": interface_arg, "description": interface_arg, "ip": active_ip or "0.0.0.0", "scapy_key": interface_arg}
 
 
 def _run_traffic_simulator(api_url: str):
-    """Fallback runner for traffic simulator."""
     import subprocess
     from pathlib import Path
 
@@ -557,7 +475,6 @@ def _run_traffic_simulator(api_url: str):
 
 
 def _handle_permission_denied(api_url: str, fallback_sim: bool = False):
-    """Display guidance when packet capture lacks Administrator rights."""
     print("\n" + "=" * 76)
     print("  [!] LIVE PACKET CAPTURE REQUIRES ADMINISTRATOR PRIVILEGES")
     print("=" * 76)
@@ -594,10 +511,6 @@ def _handle_permission_denied(api_url: str, fallback_sim: bool = False):
 
 def _capture_with_raw_socket(bind_ip: str, extractor: FlowExtractor, count: int,
                              api_url: str, fallback_sim: bool = False):
-    """
-    Capture live packets on Windows using native Raw Sockets (SIO_RCVALL).
-    Works on Windows without needing Npcap or WinPcap, requiring Administrator rights.
-    """
     import socket
 
     if not bind_ip or bind_ip.startswith(("127.", "169.254.")):
@@ -673,7 +586,6 @@ def _capture_with_raw_socket(bind_ip: str, extractor: FlowExtractor, count: int,
 
 def capture_live(interface_arg: Optional[str], api_url: str, count: int = 0,
                  timeout_sec: float = 10.0, fallback_sim: bool = False):
-    """Live packet capture with auto-detection, Npcap support, and native Raw Socket fallback."""
     resolved = resolve_interface(interface_arg)
     iface_name = resolved["name"]
     iface_ip = resolved.get("ip", "")
@@ -684,7 +596,6 @@ def capture_live(interface_arg: Optional[str], api_url: str, count: int = 0,
 
     extractor = FlowExtractor(api_url=api_url, flow_timeout=timeout_sec, min_packets=2)
 
-    # Check if Npcap is available for Scapy Layer 2 sniffing
     has_npcap = False
     try:
         if getattr(conf, "use_pcap", False):
@@ -736,7 +647,6 @@ def capture_live(interface_arg: Optional[str], api_url: str, count: int = 0,
 
 def process_pcap(pcap_path: str, api_url: str, speed: float = 0.0,
                  timeout_sec: float = 10.0):
-    """Process a pcap/pcapng file and extract flows."""
     logger.info("Processing pcap: %s", pcap_path)
     logger.info("Sending flows to: %s", api_url)
 
@@ -769,9 +679,7 @@ def process_pcap(pcap_path: str, api_url: str, speed: float = 0.0,
 def main():
     parser = argparse.ArgumentParser(
         description=(
-            "Real packet capture → flow extraction → model prediction pipeline. "
-            "Captures actual network traffic, computes CIC-IDS features, and "
-            "sends them to the backend for real-time attack forecasting."
+            "Network packet capture — flow extraction and model prediction pipeline."
         )
     )
     parser.add_argument("--interface", "-i", default="auto",
@@ -795,7 +703,6 @@ def main():
         list_interfaces()
         return
 
-    # Verify backend connectivity
     try:
         resp = requests.get(f"{args.api}/health", timeout=5)
         health = resp.json()
@@ -819,4 +726,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

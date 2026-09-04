@@ -7,7 +7,8 @@ import {
   Activity, AlertTriangle, Shield, Upload, Radio,
   Eye, ChevronRight, Check, MonitorDot, Database,
   FileText, Zap, Settings, BarChart3, Terminal,
-  Cpu, Clock, Wifi,
+  Cpu, Clock, Wifi, ArrowDownToLine, ArrowUpFromLine,
+  Network, FlaskConical, GitBranch,
 } from 'lucide-react';
 import { apiFetch, apiPost, apiUpload, createWebSocket } from './api';
 import {
@@ -15,6 +16,67 @@ import {
   formatTime, formatDateTime, formatProb, formatDuration, STAGES,
 } from './utils';
 import './index.css';
+
+// ── Data source banner helpers ────────────────────────────────────────────
+const SOURCE_LABELS = {
+  simulated: { label: 'SIMULATION MODE', color: 'var(--accent)', icon: FlaskConical },
+  live_capture: { label: 'LIVE CAPTURE', color: 'var(--severity-low)', icon: Wifi },
+  csv_upload: { label: 'CSV UPLOAD', color: 'var(--severity-medium)', icon: Upload },
+  api: { label: 'API INGEST', color: 'var(--text-secondary)', icon: Zap },
+};
+
+// Direction badge
+function DirBadge({ dir }) {
+  const cfg = {
+    inbound:  { label: 'IN',  color: '#c0392b', icon: ArrowDownToLine },
+    outbound: { label: 'OUT', color: '#e67e22', icon: ArrowUpFromLine },
+    internal: { label: 'INT', color: 'var(--text-muted)', icon: Network },
+    unknown:  { label: '?',   color: 'var(--text-muted)', icon: Network },
+  }[dir] || { label: '?', color: 'var(--text-muted)', icon: Network };
+  const Icon = cfg.icon;
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 2,
+      fontSize: '0.6rem', color: cfg.color, fontWeight: 600,
+      letterSpacing: '0.05em',
+    }}>
+      <Icon size={9}/> {cfg.label}
+    </span>
+  );
+}
+
+// Source badge
+function SourceBadge({ src }) {
+  const cfg = SOURCE_LABELS[src] || SOURCE_LABELS.api;
+  const Icon = cfg.icon;
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 2,
+      fontSize: '0.6rem', color: cfg.color, fontWeight: 500,
+      letterSpacing: '0.04em',
+    }}>
+      <Icon size={8}/> {src === 'simulated' ? 'SIM' : src === 'live_capture' ? 'LIVE' : src?.toUpperCase() || 'API'}
+    </span>
+  );
+}
+
+// Compromise pulse — visual overlay for sessions in active attack stage
+function CompromiseIndicator({ stage, riskScore }) {
+  const isCompromised = stageIndex(stage) >= 3 && (riskScore || 0) > 0.5;
+  const isExfil = stage === 'Exfiltration';
+  if (!isCompromised) return null;
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 3,
+      fontSize: '0.58rem', fontWeight: 700,
+      color: isExfil ? 'var(--severity-critical)' : 'var(--severity-high)',
+      animation: 'compromisePulse 1.2s ease-in-out infinite',
+      letterSpacing: '0.05em',
+    }}>
+      ⬛ {isExfil ? 'COMPROMISED' : 'UNDER ATTACK'}
+    </span>
+  );
+}
 
 // ═══════════════════════════════════════════════════════════════
 // APP SHELL
@@ -25,6 +87,8 @@ export default function App() {
   const [alertCount, setAlertCount] = useState(0);
   const [selectedSession, setSelectedSession] = useState(null);
   const [clock, setClock] = useState(new Date());
+  // BUG-08: feature order from backend — avoids 3 hardcoded copies
+  const [featureList, setFeatureList] = useState(null);
 
   // Live clock
   useEffect(() => {
@@ -32,12 +96,18 @@ export default function App() {
     return () => clearInterval(t);
   }, []);
 
-  // Health + alert polling
+  // Health + alert polling — also extracts feature list (BUG-08)
   useEffect(() => {
-    apiFetch('/health').then(setHealth).catch(() => setHealth({ status: 'offline' }));
+    apiFetch('/health').then(h => {
+      setHealth(h);
+      if (h?.features) setFeatureList(h.features);
+    }).catch(() => setHealth({ status: 'offline' }));
     apiFetch('/alerts/stats').then(s => setAlertCount(s.unacknowledged || 0)).catch(() => {});
     const iv = setInterval(() => {
-      apiFetch('/health').then(setHealth).catch(() => setHealth({ status: 'offline' }));
+      apiFetch('/health').then(h => {
+        setHealth(h);
+        if (h?.features) setFeatureList(h.features);
+      }).catch(() => setHealth({ status: 'offline' }));
       apiFetch('/alerts/stats').then(s => setAlertCount(s.unacknowledged || 0)).catch(() => {});
     }, 5000);
     return () => clearInterval(iv);
@@ -139,11 +209,11 @@ export default function App() {
 
       {/* ── Main ── */}
       <main className="main-content">
-        {view === 'dashboard' && <Dashboard onSelectSession={onSelectSession}/>}
-        {view === 'forecast' && <ForecastView session={selectedSession} onBack={() => setView('dashboard')}/>}
+        {view === 'dashboard' && <Dashboard onSelectSession={onSelectSession} featureList={featureList}/>}
+        {view === 'forecast' && <ForecastView session={selectedSession} onBack={() => setView('dashboard')} featureList={featureList}/>}
         {view === 'alerts' && <AlertsView/>}
         {view === 'live_logs' && <LiveLogsView/>}
-        {view === 'explain' && <ExplainView/>}
+        {view === 'explain' && <ExplainView featureList={featureList}/>}
         {view === 'reports' && <ReportsView/>}
         {view === 'ingest' && <IngestPanel/>}
         {view === 'settings' && <SettingsView health={health}/>}
@@ -216,10 +286,12 @@ function Dashboard({ onSelectSession }) {
   const [stats, setStats] = useState({});
   const [alertStats, setAlertStats] = useState({});
   const [loading, setLoading] = useState(true);
+  const [simBannerDismissed, setSimBannerDismissed] = useState(false);
+  const [sortBy, setSortBy] = useState('last_seen');
 
   const refresh = useCallback(() => {
     Promise.all([
-      apiFetch('/sessions?limit=100'),
+      apiFetch(`/sessions?limit=100&sort_by=${sortBy}`),
       apiFetch('/dashboard/stats'),
       apiFetch('/alerts/stats'),
     ]).then(([s, st, as]) => {
@@ -228,7 +300,7 @@ function Dashboard({ onSelectSession }) {
       setAlertStats(as);
       setLoading(false);
     }).catch(() => setLoading(false));
-  }, []);
+  }, [sortBy]);
 
   useEffect(() => {
     refresh();
@@ -238,6 +310,24 @@ function Dashboard({ onSelectSession }) {
 
   return (
     <>
+      {/* §7 — Simulation banner */}
+      {stats.has_simulated_data && !simBannerDismissed && (
+        <div style={{
+          background: 'linear-gradient(90deg, rgba(230,126,34,0.12), rgba(230,126,34,0.06))',
+          border: '1px solid var(--accent)',
+          borderRadius: 'var(--radius)',
+          padding: 'var(--sp-2) var(--sp-4)',
+          marginBottom: 'var(--sp-3)',
+          display: 'flex', alignItems: 'center', gap: 'var(--sp-3)',
+        }}>
+          <FlaskConical size={13} color="var(--accent)"/>
+          <span className="mono" style={{ fontSize: '0.67rem', color: 'var(--accent)', flex: 1 }}>
+            SIMULATION DATA ACTIVE — traffic was generated by <code>traffic_simulator.py</code>, not captured from a real network interface.
+          </span>
+          <button className="btn btn-sm" onClick={() => setSimBannerDismissed(true)} style={{ fontSize: '0.6rem' }}>DISMISS</button>
+        </div>
+      )}
+
       {/* Stats cards */}
       <div className="stats-bar">
         <div className="stat-card">
@@ -260,6 +350,22 @@ function Dashboard({ onSelectSession }) {
             {alertStats.unacknowledged || 0}
           </div>
         </div>
+        {stats.direction_breakdown && (
+          <div className="stat-card">
+            <div className="stat-card-label">INBOUND</div>
+            <div className="stat-card-value" style={{ color: 'var(--severity-high)', fontSize: '1rem' }}>
+              {stats.direction_breakdown.inbound || 0}
+            </div>
+          </div>
+        )}
+        {stats.direction_breakdown && (
+          <div className="stat-card">
+            <div className="stat-card-label">OUTBOUND</div>
+            <div className="stat-card-value" style={{ color: 'var(--accent)', fontSize: '1rem' }}>
+              {stats.direction_breakdown.outbound || 0}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Sessions table */}
@@ -277,32 +383,56 @@ function Dashboard({ onSelectSession }) {
               <tr>
                 <th>SRC_IP</th>
                 <th>DST_IP</th>
-                <th>FLOWS</th>
-                <th>RISK</th>
+                <th style={{ cursor: 'pointer' }} onClick={() => setSortBy('flow_count')}>FLOWS {sortBy === 'flow_count' ? '▼' : ''}</th>
+                <th style={{ cursor: 'pointer' }} onClick={() => setSortBy('latest_risk_score')}>RISK {sortBy === 'latest_risk_score' ? '▼' : ''}</th>
                 <th>STAGE</th>
+                <th>MAX_STAGE</th>
+                <th>DIR</th>
+                <th>SRC</th>
                 <th>KILL_CHAIN</th>
-                <th>LAST_SEEN</th>
+                <th style={{ cursor: 'pointer' }} onClick={() => setSortBy('last_seen')}>LAST_SEEN {sortBy === 'last_seen' ? '▼' : ''}</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {sessions.map(s => (
-                <tr key={s.session_key} onClick={() => onSelectSession(s)}>
-                  <td>{s.src_ip || '\u2014'}</td>
-                  <td>{s.dst_ip || '\u2014'}</td>
-                  <td>{s.flow_count}</td>
-                  <td>
-                    <div className="risk-cell">
-                      <div className={`risk-bar ${severityClass(s.latest_risk_score)}`}/>
-                      <span>{formatProb(s.latest_risk_score)}</span>
-                    </div>
-                  </td>
-                  <td><span className={`stage-badge ${stageClass(s.latest_stage)}`}>{s.latest_stage}</span></td>
-                  <td><KillChainCompact currentStage={s.latest_stage}/></td>
-                  <td>{formatTime(s.last_seen)}</td>
-                  <td><ChevronRight size={13} color="var(--text-muted)"/></td>
-                </tr>
-              ))}
+              {sessions.map(s => {
+                const isCompromised = stageIndex(s.latest_stage) >= 3 && (s.latest_risk_score || 0) > 0.5;
+                return (
+                  <tr
+                    key={s.session_key}
+                    onClick={() => onSelectSession(s)}
+                    style={{
+                      background: isCompromised
+                        ? `linear-gradient(90deg, rgba(192,57,43,0.06), transparent)`
+                        : undefined,
+                    }}
+                  >
+                    <td>{s.src_ip || '\u2014'}</td>
+                    <td>{s.dst_ip || '\u2014'}</td>
+                    <td>{s.flow_count}</td>
+                    <td>
+                      <div className="risk-cell">
+                        <div className={`risk-bar ${severityClass(s.latest_risk_score)}`}/>
+                        <span>{formatProb(s.latest_risk_score)}</span>
+                      </div>
+                    </td>
+                    <td>
+                      <span className={`stage-badge ${stageClass(s.latest_stage)}`}>{s.latest_stage}</span>
+                      <CompromiseIndicator stage={s.latest_stage} riskScore={s.latest_risk_score}/>
+                    </td>
+                    <td>
+                      <span className={`stage-badge ${stageClass(s.max_stage_reached || 'Benign')}`} style={{ opacity: 0.75, fontSize: '0.58rem' }}>
+                        {s.max_stage_reached || 'Benign'}
+                      </span>
+                    </td>
+                    <td><DirBadge dir={s.direction}/></td>
+                    <td><SourceBadge src={s.source}/></td>
+                    <td><KillChainCompact currentStage={s.max_stage_reached || s.latest_stage}/></td>
+                    <td>{formatTime(s.last_seen)}</td>
+                    <td><ChevronRight size={13} color="var(--text-muted)"/></td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
@@ -315,12 +445,22 @@ function Dashboard({ onSelectSession }) {
 // ═══════════════════════════════════════════════════════════════
 // FORECAST VIEW — kill chain + rollout chart + SHAP + flow logs
 // ═══════════════════════════════════════════════════════════════
-function ForecastView({ session, onBack }) {
+function ForecastView({ session, onBack, featureList }) {
   const [forecast, setForecast] = useState(null);
   const [explanation, setExplanation] = useState(null);
   const [flows, setFlows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+
+  // BUG-08: build window using backend's feature ordering, fall back to hardcoded
+  const FEAT_ORDER = featureList || [
+    'flow_duration', 'tot_fwd_pkts', 'tot_bwd_pkts', 'fwd_pkt_len_mean',
+    'bwd_pkt_len_mean', 'flow_bytes_s', 'flow_pkts_s', 'flow_iat_mean',
+    'flow_iat_std', 'fwd_iat_mean', 'bwd_iat_mean', 'syn_flag_cnt',
+    'ack_flag_cnt', 'fin_flag_cnt', 'rst_flag_cnt', 'psh_flag_cnt',
+    'urg_flag_cnt', 'down_up_ratio', 'pkt_size_avg', 'ttl_variance',
+    'tcp_win_size', 'retransmit_cnt',
+  ];
 
   useEffect(() => {
     if (!session) return;
@@ -335,19 +475,7 @@ function ForecastView({ session, onBack }) {
           setLoading(false);
           return;
         }
-        const window = allFlows.slice(0, 6).reverse().map(f => {
-          const feats = f.features;
-          return [
-            feats.flow_duration, feats.tot_fwd_pkts, feats.tot_bwd_pkts,
-            feats.fwd_pkt_len_mean, feats.bwd_pkt_len_mean, feats.flow_bytes_s,
-            feats.flow_pkts_s, feats.flow_iat_mean, feats.flow_iat_std,
-            feats.fwd_iat_mean, feats.bwd_iat_mean, feats.syn_flag_cnt,
-            feats.ack_flag_cnt, feats.fin_flag_cnt, feats.rst_flag_cnt,
-            feats.psh_flag_cnt, feats.urg_flag_cnt, feats.down_up_ratio,
-            feats.pkt_size_avg, feats.ttl_variance, feats.tcp_win_size,
-            feats.retransmit_cnt,
-          ];
-        });
+        const window = allFlows.slice(0, 6).reverse().map(f => FEAT_ORDER.map(k => f.features?.[k] ?? 0));
 
         return Promise.all([
           apiPost('/forecast', { window, k_steps: 6, n_mc_samples: 20, needs_scaling: true }),
@@ -398,12 +526,15 @@ function ForecastView({ session, onBack }) {
   return (
     <>
       {/* Session header + back button */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', marginBottom: 'var(--sp-3)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', marginBottom: 'var(--sp-3)', flexWrap: 'wrap' }}>
         <button className="btn btn-sm" onClick={onBack}>&larr; BACK</button>
         <span className="mono text-sm" style={{ color: 'var(--text-secondary)' }}>
           {session.src_ip} &rarr; {session.dst_ip}
         </span>
         <span className={`stage-badge ${stageClass(session.latest_stage)}`}>{session.latest_stage}</span>
+        <DirBadge dir={session.direction}/>
+        <SourceBadge src={session.source}/>
+        <CompromiseIndicator stage={session.max_stage_reached || session.latest_stage} riskScore={session.latest_risk_score}/>
         {forecast?.alert_triggered && (
           <span className="severity-badge critical">ALERT AT STEP +{forecast.alert_at_step}</span>
         )}
@@ -501,46 +632,70 @@ function ForecastView({ session, onBack }) {
       <div className="panel">
         <div className="panel-header">
           <span className="panel-title">NETWORK_LOGS</span>
-          <span className="panel-meta">{flows.length} flow records</span>
+          <span className="panel-meta">{flows.length} flow records &middot; most recent first</span>
         </div>
-        <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+        <div style={{ maxHeight: '380px', overflowY: 'auto' }}>
           {flows.length === 0 ? (
             <div className="empty-state"><p>No flow records.</p></div>
           ) : (
-            <table className="data-table">
+            <table className="data-table" style={{ fontSize: '0.65rem' }}>
               <thead>
                 <tr>
                   <th>#</th>
                   <th>TIMESTAMP</th>
                   <th>DURATION</th>
-                  <th>FWD_PKTS</th>
-                  <th>BWD_PKTS</th>
+                  <th>FWD↑</th>
+                  <th>BWD↓</th>
                   <th>BYTES/S</th>
+                  <th>PKTS/S</th>
                   <th>SYN</th>
                   <th>ACK</th>
                   <th>RST</th>
+                  <th>PSH</th>
+                  <th>FIN</th>
+                  <th>URG</th>
+                  <th>TTL_VAR</th>
+                  <th>WIN</th>
+                  <th>RETX</th>
                   <th>P(INFIL)</th>
                   <th>STAGE</th>
+                  <th>SRC</th>
                 </tr>
               </thead>
               <tbody>
-                {flows.map((f, i) => (
-                  <tr key={f.id} style={{ cursor: 'default' }}>
-                    <td style={{ color: 'var(--text-muted)' }}>{flows.length - i}</td>
-                    <td>{formatTime(f.timestamp)}</td>
-                    <td>{formatDuration(f.features?.flow_duration)}</td>
-                    <td>{f.features?.tot_fwd_pkts?.toFixed(0) || 0}</td>
-                    <td>{f.features?.tot_bwd_pkts?.toFixed(0) || 0}</td>
-                    <td>{f.features?.flow_bytes_s?.toFixed(0) || 0}</td>
-                    <td>{f.features?.syn_flag_cnt?.toFixed(0) || 0}</td>
-                    <td>{f.features?.ack_flag_cnt?.toFixed(0) || 0}</td>
-                    <td>{f.features?.rst_flag_cnt?.toFixed(0) || 0}</td>
-                    <td style={{ color: (f.infiltration_prob || 0) > 0.5 ? 'var(--severity-critical)' : 'var(--severity-low)' }}>
-                      {formatProb(f.infiltration_prob)}
-                    </td>
-                    <td><span className={`stage-badge ${stageClass(f.predicted_stage || 'Benign')}`}>{f.predicted_stage || 'Benign'}</span></td>
-                  </tr>
-                ))}
+                {flows.map((f, i) => {
+                  const feat = f.features || {};
+                  const prob = f.infiltration_prob || 0;
+                  const isAlert = prob > 0.5;
+                  return (
+                    <tr key={f.id} style={{
+                      cursor: 'default',
+                      background: isAlert ? 'rgba(192,57,43,0.05)' : undefined,
+                    }}>
+                      <td style={{ color: 'var(--text-muted)' }}>{flows.length - i}</td>
+                      <td>{formatTime(f.timestamp)}</td>
+                      <td>{formatDuration(feat.flow_duration)}</td>
+                      <td>{(feat.tot_fwd_pkts ?? 0).toFixed(0)}</td>
+                      <td>{(feat.tot_bwd_pkts ?? 0).toFixed(0)}</td>
+                      <td>{(feat.flow_bytes_s ?? 0).toFixed(0)}</td>
+                      <td>{(feat.flow_pkts_s ?? 0).toFixed(1)}</td>
+                      <td style={{ color: (feat.syn_flag_cnt ?? 0) > 3 ? 'var(--severity-high)' : undefined }}>{(feat.syn_flag_cnt ?? 0).toFixed(0)}</td>
+                      <td>{(feat.ack_flag_cnt ?? 0).toFixed(0)}</td>
+                      <td style={{ color: (feat.rst_flag_cnt ?? 0) > 0 ? 'var(--severity-medium)' : undefined }}>{(feat.rst_flag_cnt ?? 0).toFixed(0)}</td>
+                      <td>{(feat.psh_flag_cnt ?? 0).toFixed(0)}</td>
+                      <td>{(feat.fin_flag_cnt ?? 0).toFixed(0)}</td>
+                      <td style={{ color: (feat.urg_flag_cnt ?? 0) > 0 ? 'var(--severity-critical)' : undefined }}>{(feat.urg_flag_cnt ?? 0).toFixed(0)}</td>
+                      <td>{(feat.ttl_variance ?? 0).toFixed(1)}</td>
+                      <td>{(feat.tcp_win_size ?? 0).toFixed(0)}</td>
+                      <td style={{ color: (feat.retransmit_cnt ?? 0) > 2 ? 'var(--severity-high)' : undefined }}>{(feat.retransmit_cnt ?? 0).toFixed(0)}</td>
+                      <td style={{ color: isAlert ? 'var(--severity-critical)' : 'var(--severity-low)', fontWeight: isAlert ? 700 : 400 }}>
+                        {formatProb(prob)}
+                      </td>
+                      <td><span className={`stage-badge ${stageClass(f.predicted_stage || 'Benign')}`}>{f.predicted_stage || 'Benign'}</span></td>
+                      <td><SourceBadge src={f.source}/></td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -623,6 +778,10 @@ function LiveLogsView() {
               <span className="sep"> | </span>
               <span className="ip">{line.src_ip || '?'} &rarr; {line.dst_ip || '?'}</span>
               <span className="sep"> | </span>
+              <DirBadge dir={line.direction}/>
+              <span className="sep"> | </span>
+              <SourceBadge src={line.source}/>
+              <span className="sep"> | </span>
               <span className="val">{line.flow_count || 0} flows</span>
               <span className="sep"> | </span>
               <span className="val">P={formatProb(line.infiltration_prob)}</span>
@@ -630,6 +789,14 @@ function LiveLogsView() {
               <span className="stage-flag">{line.predicted_stage || 'Benign'}</span>
               {(line.infiltration_prob || 0) > 0.5 && (
                 <span className="alert-flag"> &#9650; ALERT</span>
+              )}
+              {line.max_stage_reached && line.max_stage_reached !== line.predicted_stage && (
+                <span className="sep"> max=</span>
+              )}
+              {line.max_stage_reached && line.max_stage_reached !== line.predicted_stage && (
+                <span className={`stage-flag ${stageClass(line.max_stage_reached)}`}>
+                  {line.max_stage_reached}
+                </span>
               )}
             </div>
           ))
@@ -724,11 +891,20 @@ function AlertsView() {
 // ═══════════════════════════════════════════════════════════════
 // EXPLAIN VIEW — standalone feature attribution
 // ═══════════════════════════════════════════════════════════════
-function ExplainView() {
+function ExplainView({ featureList }) {
   const [sessions, setSessions] = useState([]);
   const [selected, setSelected] = useState(null);
   const [explanation, setExplanation] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  const FEAT_ORDER = featureList || [
+    'flow_duration', 'tot_fwd_pkts', 'tot_bwd_pkts', 'fwd_pkt_len_mean',
+    'bwd_pkt_len_mean', 'flow_bytes_s', 'flow_pkts_s', 'flow_iat_mean',
+    'flow_iat_std', 'fwd_iat_mean', 'bwd_iat_mean', 'syn_flag_cnt',
+    'ack_flag_cnt', 'fin_flag_cnt', 'rst_flag_cnt', 'psh_flag_cnt',
+    'urg_flag_cnt', 'down_up_ratio', 'pkt_size_avg', 'ttl_variance',
+    'tcp_win_size', 'retransmit_cnt',
+  ];
 
   useEffect(() => {
     apiFetch('/sessions?limit=50').then(setSessions).catch(() => {});
@@ -740,19 +916,7 @@ function ExplainView() {
     apiFetch(`/sessions/${encodeURIComponent(session.session_key)}/flows?limit=6`)
       .then(flows => {
         if (flows.length < 6) throw new Error('Need 6+ flows');
-        const window = flows.slice(0, 6).reverse().map(f => {
-          const feats = f.features;
-          return [
-            feats.flow_duration, feats.tot_fwd_pkts, feats.tot_bwd_pkts,
-            feats.fwd_pkt_len_mean, feats.bwd_pkt_len_mean, feats.flow_bytes_s,
-            feats.flow_pkts_s, feats.flow_iat_mean, feats.flow_iat_std,
-            feats.fwd_iat_mean, feats.bwd_iat_mean, feats.syn_flag_cnt,
-            feats.ack_flag_cnt, feats.fin_flag_cnt, feats.rst_flag_cnt,
-            feats.psh_flag_cnt, feats.urg_flag_cnt, feats.down_up_ratio,
-            feats.pkt_size_avg, feats.ttl_variance, feats.tcp_win_size,
-            feats.retransmit_cnt,
-          ];
-        });
+        const window = flows.slice(0, 6).reverse().map(f => FEAT_ORDER.map(k => f.features?.[k] ?? 0));
         return apiPost('/explain', { window, top_k: 22, needs_scaling: true });
       })
       .then(result => { setExplanation(result); setLoading(false); })

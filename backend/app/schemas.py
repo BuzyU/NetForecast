@@ -35,10 +35,15 @@ class FlowRecord(BaseModel):
     tcp_win_size: float
     retransmit_cnt: float
 
-    # Optional metadata for session grouping
+    # Optional metadata for session grouping + data provenance
     src_ip: Optional[str] = None
     dst_ip: Optional[str] = None
     timestamp: Optional[datetime] = None
+    # §7: tag the origin of this flow so the UI can show a SIMULATION banner
+    source: Optional[str] = Field(
+        default="api",
+        description='Origin of this flow: "live_capture", "simulated", "csv_upload", or "api"',
+    )
 
     def to_feature_array(self) -> list[float]:
         """Extract the 22 features in the correct order."""
@@ -175,13 +180,14 @@ class HealthResponse(BaseModel):
     db_connected: bool
     artifacts_path: str
     features_count: int
+    features: list[str]  # BUG-08: ordered feature list for frontend to consume
     stages: list[str]
     device: str
 
 
 # ── WebSocket messages ───────────────────────────────────────────────
-class LiveFlowEvent(BaseModel):
-    event_type: str  # "flow_ingested", "prediction", "alert"
-    session_key: str
-    data: dict
-    timestamp: datetime
+# Note: LiveFlowEvent was previously defined but unused.
+# The broadcast payload is now a plain dict emitted from live.py::broadcast().
+# Structure: {type, session_key, src_ip, dst_ip, direction, source,
+#              flow_count, infiltration_prob, predicted_stage,
+#              max_stage_reached, alert, timestamp}

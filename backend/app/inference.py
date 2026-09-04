@@ -1,8 +1,3 @@
-"""
-Core inference engine — predict, forecast, explain.
-These are the same algorithms from pipeline_fixed.py lines 145-185,
-restructured as importable functions.
-"""
 import logging
 from typing import Optional
 
@@ -28,10 +23,6 @@ def _ensure_loaded():
 
 
 def predict_single(window: np.ndarray) -> dict:
-    """
-    Single-step prediction from a (WINDOW_SIZE, N_FEATURES) scaled window.
-    Returns infiltration probability, predicted stage, and alert status.
-    """
     _ensure_loaded()
 
     if window.shape != (WINDOW_SIZE, N_FEATURES):
@@ -62,10 +53,6 @@ def forward_simulate(
     k_steps: int = DEFAULT_K_STEPS,
     noise_std: float = 0.0,
 ) -> list[dict]:
-    """
-    Autoregressive k-step rollout.
-    Exact replica of pipeline_fixed.py forward_simulate (lines 145-159).
-    """
     _ensure_loaded()
     model = artifacts.model
     device = artifacts.device
@@ -93,7 +80,6 @@ def forward_simulate(
 
 
 def ema_smooth(probs: list[float], alpha: float = EMA_ALPHA) -> list[float]:
-    """EMA smoothing — exact replica from pipeline_fixed.py lines 162-166."""
     smoothed = [probs[0]]
     for p in probs[1:]:
         smoothed.append(alpha * p + (1 - alpha) * smoothed[-1])
@@ -106,10 +92,6 @@ def forecast_rollout(
     n_mc_samples: int = DEFAULT_MC_SAMPLES,
     noise_std: float = DEFAULT_MC_NOISE_STD,
 ) -> dict:
-    """
-    Monte Carlo rollout with EMA smoothing.
-    Exact replica of pipeline_fixed.py monte_carlo_rollout (lines 169-185).
-    """
     _ensure_loaded()
 
     all_probs = np.zeros((n_mc_samples, k_steps))
@@ -126,14 +108,12 @@ def forecast_rollout(
     std_probs = all_probs.std(axis=0)
     ema_probs = ema_smooth(mean_probs.tolist())
 
-    # Deterministic tie-break for mode stage (from pipeline_fixed.py fix 4)
     mode_stages = []
     for col in zip(*all_stages):
         counts = {s: col.count(s) for s in set(col)}
         best = sorted(counts.items(), key=lambda kv: (-kv[1], STAGES.index(kv[0])))[0][0]
         mode_stages.append(best)
 
-    # Build response
     steps = []
     alert_triggered = False
     alert_at_step = None
@@ -158,11 +138,6 @@ def forecast_rollout(
 
 
 def explain_window(window: np.ndarray, top_k: int = 10) -> dict:
-    """
-    Feature attribution via gradient-based importance.
-    Uses integrated-gradients-lite approach (gradient × input) which is fast
-    enough for real-time use. Falls back gracefully if SHAP is available.
-    """
     _ensure_loaded()
     model = artifacts.model
     device = artifacts.device
@@ -173,15 +148,12 @@ def explain_window(window: np.ndarray, top_k: int = 10) -> dict:
     next_state, inf_logit, stage_logits = model(x)
     prob = torch.sigmoid(inf_logit).item()
 
-    # Gradient of infiltration logit w.r.t. input features (avoids sigmoid saturation)
     inf_logit.backward()
-    grads = x.grad.detach().cpu().numpy()[0]  # (WINDOW, N_FEATURES)
+    grads = x.grad.detach().cpu().numpy()[0]
     input_vals = x.detach().cpu().numpy()[0]
 
-    # Gradient × input (legitimate input-attribution method)
-    attributions = (grads * input_vals).mean(axis=0)  # average over window steps
+    attributions = (grads * input_vals).mean(axis=0)
 
-    # Sort by absolute importance
     indices = np.argsort(np.abs(attributions))[::-1][:top_k]
     from .config import FLOW_FEATURES
 

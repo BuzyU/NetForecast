@@ -1,14 +1,10 @@
-"""
-FastAPI application — entry point.
-Loads model at startup. Fails loudly if artifacts are missing.
-"""
 import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .config import ALLOWED_ORIGINS, STAGES, N_FEATURES, ARTIFACTS_DIR
+from .config import ALLOWED_ORIGINS, STAGES, N_FEATURES, ARTIFACTS_DIR, FLOW_FEATURES
 from .model_loader import artifacts
 from .database import init_db
 from .schemas import HealthResponse
@@ -25,12 +21,10 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: load model + init DB. Shutdown: cleanup."""
     logger.info("=" * 60)
     logger.info("Network Attack Forecasting Service — Starting")
     logger.info("=" * 60)
 
-    # ── Load model artifacts (fail loudly) ────────────────────────
     try:
         artifacts.load()
     except Exception as e:
@@ -39,8 +33,8 @@ async def lifespan(app: FastAPI):
         logger.critical("Expected artifacts in: %s", ARTIFACTS_DIR)
         raise
 
-    # ── Initialize database ───────────────────────────────────────
     await init_db()
+    await _migrate_db()
 
     logger.info("=" * 60)
     logger.info("Service ready — all systems operational")
@@ -51,19 +45,38 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down...")
 
 
+async def _migrate_db():
+    """Add new columns to existing SQLite databases without dropping tables."""
+    from .database import engine
+    new_columns = [
+        ("flow_records", "source", "VARCHAR(32) DEFAULT 'api'"),
+        ("sessions", "source", "VARCHAR(32) DEFAULT 'api'"),
+        ("sessions", "direction", "VARCHAR(16) DEFAULT 'unknown'"),
+        ("sessions", "max_stage_reached", "VARCHAR(32) DEFAULT 'Benign'"),
+    ]
+    import sqlalchemy
+    async with engine.begin() as conn:
+        for table, col, col_def in new_columns:
+            try:
+                await conn.execute(
+                    sqlalchemy.text(f"ALTER TABLE {table} ADD COLUMN {col} {col_def}")
+                )
+                logger.info("Migration: added column %s.%s", table, col)
+            except Exception:
+                pass  # column already exists — expected on subsequent starts
+
+
 app = FastAPI(
     title="Network Attack Forecasting API",
     description=(
-        "AI-based network attack forecasting from network traffic data. "
-        "SIH 2026 — PS26153 (NTRO). LSTM World Model with MITRE ATT&CK stage "
-        "classification, infiltration probability forecasting, and feature "
-        "attribution explainability."
+        "Network attack forecasting from live traffic data. "
+        "LSTM-based stage classification and infiltration probability forecasting "
+        "with feature attribution explainability."
     ),
     version="1.0.0",
     lifespan=lifespan,
 )
 
-# ── CORS ──────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -72,7 +85,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Routes ────────────────────────────────────────────────────────────
 app.include_router(predict.router, tags=["Prediction"])
 app.include_router(forecast.router, tags=["Forecasting"])
 app.include_router(explain.router, tags=["Explainability"])
@@ -83,9 +95,6 @@ app.include_router(ws.router, tags=["Live Feed"])
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
-    """
-    Honest health check — reports real status, never lies.
-    """
     from .database import engine
     db_ok = False
     try:
@@ -105,6 +114,7 @@ async def health_check():
         db_connected=db_ok,
         artifacts_path=str(ARTIFACTS_DIR),
         features_count=N_FEATURES,
+        features=FLOW_FEATURES,  # BUG-08: single source of truth for feature order
         stages=STAGES,
         device=str(artifacts.device) if model_ok else "unavailable",
     )
