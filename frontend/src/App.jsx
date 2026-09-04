@@ -107,16 +107,23 @@ export default function App() {
 
   // Health + alert polling — also extracts feature list (BUG-08)
   useEffect(() => {
-    apiFetch('/health').then(h => {
+    const updateHealth = (h) => {
       setHealth(h);
-      if (h?.features) setFeatureList(h.features);
-    }).catch(() => setHealth({ status: 'offline' }));
+      if (h?.features && Array.isArray(h.features)) {
+        setFeatureList(prev => {
+          if (prev && prev.length === h.features.length && prev.every((v, i) => v === h.features[i])) {
+            return prev;
+          }
+          return h.features;
+        });
+      }
+    };
+
+    apiFetch('/health').then(updateHealth).catch(() => setHealth({ status: 'offline' }));
     apiFetch('/alerts/stats').then(s => setAlertCount(s.unacknowledged || 0)).catch(() => {});
+
     const iv = setInterval(() => {
-      apiFetch('/health').then(h => {
-        setHealth(h);
-        if (h?.features) setFeatureList(h.features);
-      }).catch(() => setHealth({ status: 'offline' }));
+      apiFetch('/health').then(updateHealth).catch(() => setHealth({ status: 'offline' }));
       apiFetch('/alerts/stats').then(s => setAlertCount(s.unacknowledged || 0)).catch(() => {});
     }, 5000);
     return () => clearInterval(iv);
@@ -462,21 +469,21 @@ function ForecastView({ session, onBack, featureList }) {
   const [error, setError] = useState(null);
 
   const featOrder = featureList || DEFAULT_FEAT_ORDER;
+  const sessionKey = session?.session_key;
 
   useEffect(() => {
-    if (!session) return;
+    if (!sessionKey) return;
     let active = true;
 
     (async () => {
       setLoading(true);
       setError(null);
       try {
-        const allFlows = await apiFetch(`/sessions/${encodeURIComponent(session.session_key)}/flows?limit=100`);
+        const allFlows = await apiFetch(`/sessions/${encodeURIComponent(sessionKey)}/flows?limit=100`);
         if (!active) return;
         setFlows(allFlows);
         if (allFlows.length < 6) {
           setError(`Need at least 6 flows for forecast, have ${allFlows.length}`);
-          setLoading(false);
           return;
         }
         const window = allFlows.slice(0, 6).reverse().map(f => featOrder.map(k => f.features?.[k] ?? 0));
@@ -495,7 +502,7 @@ function ForecastView({ session, onBack, featureList }) {
     })();
 
     return () => { active = false; };
-  }, [session, featOrder]);
+  }, [sessionKey, featOrder]);
 
   if (!session) {
     return (
@@ -506,11 +513,13 @@ function ForecastView({ session, onBack, featureList }) {
     );
   }
 
-  if (loading) {
+  // Only show full empty-state loader on initial fetch when no forecast exists yet
+  if (loading && !forecast) {
     return <div className="empty-state"><div className="loading-spinner"/><p>Running forecast model...</p></div>;
   }
 
-  if (error) {
+  // Only show full empty-state error if there is no forecast to display
+  if (error && !forecast) {
     return <div className="empty-state"><AlertTriangle size={28} color="var(--severity-high)"/><p>{error}</p></div>;
   }
 
@@ -540,6 +549,15 @@ function ForecastView({ session, onBack, featureList }) {
         <DirBadge dir={session.direction}/>
         <SourceBadge src={session.source}/>
         <CompromiseIndicator stage={session.max_stage_reached || session.latest_stage} riskScore={session.latest_risk_score}/>
+        {loading && (
+          <span className="mono" style={{ fontSize: '0.62rem', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <span className="loading-spinner" style={{ width: 10, height: 10, borderWidth: 1.5, margin: 0 }}/>
+            SYNCING
+          </span>
+        )}
+        {error && (
+          <span className="severity-badge high" title={error} style={{ fontSize: '0.6rem' }}>REFRESH FAILED</span>
+        )}
         {forecast?.alert_triggered && (
           <span className="severity-badge critical">ALERT AT STEP +{forecast.alert_at_step}</span>
         )}
@@ -563,7 +581,7 @@ function ForecastView({ session, onBack, featureList }) {
             <span className="panel-title">K_STEP_FORECAST</span>
             <span className="panel-meta">MC n=20 &middot; EMA &alpha;=0.4</span>
           </div>
-          <div className="panel-body chart-container">
+          <div className="panel-body chart-container" style={{ minHeight: 320 }}>
             <ResponsiveContainer width="100%" height={260}>
               <AreaChart data={chartData} margin={{ top: 10, right: 20, bottom: 5, left: 10 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#d4c5b0"/>
@@ -573,10 +591,10 @@ function ForecastView({ session, onBack, featureList }) {
                   contentStyle={{ background: '#fffbf5', border: '1px solid #d4c5b0', borderRadius: 3, fontSize: 12 }}
                   labelStyle={{ color: '#5a5245' }}
                 />
-                <Area type="monotone" dataKey="upper" stroke="none" fill="#e67e22" fillOpacity={0.08} stackId="band"/>
-                <Area type="monotone" dataKey="lower" stroke="none" fill="#f5efe6" fillOpacity={1} stackId="band"/>
-                <Area type="monotone" dataKey="mean" stroke="#e67e22" strokeWidth={2} fill="none" name="MC Mean"/>
-                <Area type="monotone" dataKey="ema" stroke="#8a7f72" strokeWidth={1.5} strokeDasharray="4 3" fill="none" name="EMA"/>
+                <Area type="monotone" dataKey="upper" stroke="none" fill="#e67e22" fillOpacity={0.08} stackId="band" isAnimationActive={false}/>
+                <Area type="monotone" dataKey="lower" stroke="none" fill="#f5efe6" fillOpacity={1} stackId="band" isAnimationActive={false}/>
+                <Area type="monotone" dataKey="mean" stroke="#e67e22" strokeWidth={2} fill="none" name="MC Mean" isAnimationActive={false}/>
+                <Area type="monotone" dataKey="ema" stroke="#8a7f72" strokeWidth={1.5} strokeDasharray="4 3" fill="none" name="EMA" isAnimationActive={false}/>
                 <ReferenceLine y={forecast?.threshold || 0.5} stroke="#c0392b" strokeDasharray="6 4" strokeWidth={1}
                   label={{ value: 'Threshold', position: 'right', fill: '#c0392b', fontSize: 10 }}/>
               </AreaChart>
