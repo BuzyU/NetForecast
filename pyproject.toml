@@ -1,0 +1,14 @@
+[project]
+name = "netforecast"
+version = "1.0.0"
+description = "Network Attack Forecasting Engine"
+requires-python = ">=3.10"
+
+[tool.pyrefly]
+python-interpreter-path = "backend/venv/Scripts/python.exe"
+search_path = [
+  ".",
+  "backend",
+  "capture",
+  "backend/venv/Lib/site-packages"
+]
