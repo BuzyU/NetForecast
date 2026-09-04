@@ -265,32 +265,6 @@ export default function App() {
           SYS_VIEW // <span className="view-name">[{viewLabels[view] || view.toUpperCase()}]</span>
         </span>
         <div className="header-right">
-          <button
-            onClick={() => handleToggleMode(systemMode === 'live' ? 'simulated' : 'live')}
-            className="btn btn-sm"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              fontSize: '0.66rem',
-              fontWeight: 700,
-              letterSpacing: '0.04em',
-              padding: '2px 9px',
-              borderRadius: 4,
-              border: systemMode === 'live' ? '1px solid #27ae60' : '1px solid #e67e22',
-              background: systemMode === 'live' ? 'rgba(39, 174, 96, 0.1)' : 'rgba(230, 126, 34, 0.1)',
-              color: systemMode === 'live' ? '#27ae60' : '#e67e22',
-              cursor: 'pointer',
-            }}
-            title={`Click to switch mode to ${systemMode === 'live' ? 'SIMULATION' : 'LIVE ONLY'}`}
-          >
-            <span style={{
-              width: 7, height: 7, borderRadius: '50%',
-              background: systemMode === 'live' ? '#27ae60' : '#e67e22',
-              boxShadow: systemMode === 'live' ? '0 0 6px #27ae60' : '0 0 6px #e67e22',
-            }}/>
-            {systemMode === 'live' ? 'LIVE ONLY' : 'SIMULATION'}
-          </button>
           <div className="header-indicator">
             <span className={`dot ${systemStatus === 'nominal' ? '' : systemStatus}`}/>
             {health?.model_loaded ? `MODEL: ${health.device?.toUpperCase() || 'CPU'}` : 'MODEL: LOADING'}
@@ -402,11 +376,9 @@ function Dashboard({ onSelectSession, systemMode }) {
   const [loading, setLoading] = useState(true);
   const [simBannerDismissed, setSimBannerDismissed] = useState(false);
   const [sortBy, setSortBy] = useState('last_seen');
-  const [filterSource, setFilterSource] = useState('all');
-  const activeFilter = systemMode === 'live' ? 'live' : filterSource;
 
   const refresh = useCallback(() => {
-    const srcParam = activeFilter !== 'all' ? `&source=${activeFilter}` : '';
+    const srcParam = systemMode === 'live' ? '&source=live' : '';
     Promise.all([
       apiFetch(`/sessions?limit=100&sort_by=${sortBy}${srcParam}`),
       apiFetch('/dashboard/stats'),
@@ -417,7 +389,7 @@ function Dashboard({ onSelectSession, systemMode }) {
       setAlertStats(as);
       setLoading(false);
     }).catch(() => setLoading(false));
-  }, [sortBy, activeFilter]);
+  }, [sortBy, systemMode]);
 
   useEffect(() => {
     refresh();
@@ -485,38 +457,34 @@ function Dashboard({ onSelectSession, systemMode }) {
         )}
       </div>
 
-      {/* Sessions table header bar with Source filter pills */}
+      {/* Sessions table header bar with mode indication */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-2)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
           <span className="section-label" style={{ marginBottom: 0 }}>ACTIVE_SESSIONS</span>
           <span className="mono text-sm" style={{ color: 'var(--text-muted)' }}>({sessions.length})</span>
         </div>
-        <div style={{ display: 'inline-flex', gap: 4, background: 'var(--surface)', padding: 3, borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
-          <button
-            className={`btn btn-sm ${activeFilter === 'all' ? 'btn-primary' : ''}`}
-            onClick={() => setFilterSource('all')}
-            disabled={systemMode === 'live'}
-            title={systemMode === 'live' ? 'Locked in Live mode' : undefined}
-            style={{ fontSize: '0.62rem', padding: '2px 8px', opacity: systemMode === 'live' ? 0.5 : 1 }}
-          >
-            ALL
-          </button>
-          <button
-            className={`btn btn-sm ${activeFilter === 'live' ? 'btn-primary' : ''}`}
-            onClick={() => setFilterSource('live')}
-            style={{ fontSize: '0.62rem', padding: '2px 8px' }}
-          >
-            🟢 LIVE ONLY
-          </button>
-          <button
-            className={`btn btn-sm ${activeFilter === 'simulated' ? 'btn-primary' : ''}`}
-            onClick={() => setFilterSource('simulated')}
-            disabled={systemMode === 'live'}
-            title={systemMode === 'live' ? 'Locked in Live mode' : undefined}
-            style={{ fontSize: '0.62rem', padding: '2px 8px', opacity: systemMode === 'live' ? 0.5 : 1 }}
-          >
-            🟠 SIMULATED
-          </button>
+        {/* Read-only indication badge based on Settings mode */}
+        <div style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '3px 10px',
+          borderRadius: 'var(--radius)',
+          border: `1px solid ${systemMode === 'live' ? 'rgba(39, 174, 96, 0.4)' : 'rgba(230, 126, 34, 0.4)'}`,
+          background: systemMode === 'live' ? 'rgba(39, 174, 96, 0.08)' : 'rgba(230, 126, 34, 0.08)',
+          fontSize: '0.67rem',
+          fontWeight: 700,
+          letterSpacing: '0.04em',
+          color: systemMode === 'live' ? '#27ae60' : '#e67e22',
+        }}>
+          <span style={{
+            width: 7,
+            height: 7,
+            borderRadius: '50%',
+            background: systemMode === 'live' ? '#27ae60' : '#e67e22',
+            boxShadow: systemMode === 'live' ? '0 0 6px #27ae60' : '0 0 6px #e67e22',
+          }}/>
+          {systemMode === 'live' ? 'MODE: LIVE ONLY' : 'MODE: SIMULATION'}
         </div>
       </div>
 
@@ -1273,30 +1241,64 @@ function SettingsView({
         <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--sp-2)' }}>
           <div>
             <span className="panel-title">TRAFFIC_SOURCE_MODE</span>
-            <span className="panel-meta">Switch between real packet sniffing and synthetic attack simulator</span>
+            <span className="panel-meta">Master engine setting — switch between real live capture and synthetic simulation</span>
           </div>
-          <button
-            className="btn btn-sm btn-primary"
-            onClick={() => onToggleMode?.(systemMode === 'live' ? 'simulated' : 'live')}
-            style={{
-              background: systemMode === 'live' ? '#e67e22' : '#27ae60',
-              borderColor: systemMode === 'live' ? '#d35400' : '#219653',
-            }}
-          >
-            SWITCH TO {systemMode === 'live' ? 'SIMULATION MODE' : 'LIVE ONLY MODE'}
-          </button>
+          <div style={{ display: 'inline-flex', gap: 6, background: 'var(--surface)', padding: 4, borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
+            <button
+              className={`btn btn-sm ${systemMode === 'live' ? 'btn-primary' : ''}`}
+              onClick={() => onToggleMode?.('live')}
+              style={{
+                fontSize: '0.72rem',
+                fontWeight: 700,
+                padding: '4px 14px',
+                background: systemMode === 'live' ? '#27ae60' : 'transparent',
+                borderColor: systemMode === 'live' ? '#219653' : 'transparent',
+                color: systemMode === 'live' ? '#fff' : 'var(--text-secondary)',
+                cursor: 'pointer',
+              }}
+            >
+              🟢 LIVE ONLY
+            </button>
+            <button
+              className={`btn btn-sm ${systemMode === 'simulated' ? 'btn-primary' : ''}`}
+              onClick={() => onToggleMode?.('simulated')}
+              style={{
+                fontSize: '0.72rem',
+                fontWeight: 700,
+                padding: '4px 14px',
+                background: systemMode === 'simulated' ? '#e67e22' : 'transparent',
+                borderColor: systemMode === 'simulated' ? '#d35400' : 'transparent',
+                color: systemMode === 'simulated' ? '#fff' : 'var(--text-secondary)',
+                cursor: 'pointer',
+              }}
+            >
+              🟠 SIMULATED
+            </button>
+          </div>
         </div>
         <div className="panel-body">
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 'var(--sp-3)', marginBottom: 'var(--sp-4)' }}>
-            <div style={{
-              padding: 'var(--sp-3)',
-              borderRadius: 'var(--radius)',
-              border: systemMode === 'live' ? '1.5px solid #27ae60' : '1px solid var(--border)',
-              background: systemMode === 'live' ? 'rgba(39, 174, 96, 0.08)' : 'var(--surface)',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 'var(--sp-1)' }}>
-                <Wifi size={14} color="#27ae60"/>
-                <strong style={{ fontSize: '0.78rem', color: '#27ae60' }}>🟢 LIVE ONLY MODE (Real Packets)</strong>
+            <div
+              onClick={() => onToggleMode?.('live')}
+              style={{
+                padding: 'var(--sp-3)',
+                borderRadius: 'var(--radius)',
+                border: systemMode === 'live' ? '2px solid #27ae60' : '1px solid var(--border)',
+                background: systemMode === 'live' ? 'rgba(39, 174, 96, 0.08)' : 'var(--surface)',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--sp-1)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Wifi size={14} color="#27ae60"/>
+                  <strong style={{ fontSize: '0.78rem', color: '#27ae60' }}>🟢 LIVE ONLY MODE (Real Packets)</strong>
+                </div>
+                {systemMode === 'live' && (
+                  <span style={{ fontSize: '0.62rem', fontWeight: 700, color: '#27ae60', background: 'rgba(39, 174, 96, 0.15)', padding: '2px 6px', borderRadius: 4 }}>
+                    ACTIVE
+                  </span>
+                )}
               </div>
               <p style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
                 Strict real capture mode. Only genuine packets intercepted off your network interface by <code>capture/live_capture.py</code> are processed.
@@ -1304,15 +1306,27 @@ function SettingsView({
               </p>
             </div>
 
-            <div style={{
-              padding: 'var(--sp-3)',
-              borderRadius: 'var(--radius)',
-              border: systemMode === 'simulated' ? '1.5px solid #e67e22' : '1px solid var(--border)',
-              background: systemMode === 'simulated' ? 'rgba(230, 126, 34, 0.08)' : 'var(--surface)',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 'var(--sp-1)' }}>
-                <FlaskConical size={14} color="#e67e22"/>
-                <strong style={{ fontSize: '0.78rem', color: '#e67e22' }}>🟠 SIMULATION MODE (Synthetic Lab)</strong>
+            <div
+              onClick={() => onToggleMode?.('simulated')}
+              style={{
+                padding: 'var(--sp-3)',
+                borderRadius: 'var(--radius)',
+                border: systemMode === 'simulated' ? '2px solid #e67e22' : '1px solid var(--border)',
+                background: systemMode === 'simulated' ? 'rgba(230, 126, 34, 0.08)' : 'var(--surface)',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--sp-1)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <FlaskConical size={14} color="#e67e22"/>
+                  <strong style={{ fontSize: '0.78rem', color: '#e67e22' }}>🟠 SIMULATION MODE (Synthetic Lab)</strong>
+                </div>
+                {systemMode === 'simulated' && (
+                  <span style={{ fontSize: '0.62rem', fontWeight: 700, color: '#e67e22', background: 'rgba(230, 126, 34, 0.15)', padding: '2px 6px', borderRadius: 4 }}>
+                    ACTIVE
+                  </span>
+                )}
               </div>
               <p style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
                 Demo and prototyping mode. Allows <code>demo/traffic_simulator.py</code> to inject multi-stage attack scenarios to demo kill-chain prediction without an isolated VM lab.
