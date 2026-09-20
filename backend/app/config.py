@@ -18,7 +18,9 @@ DATABASE_URL = f"sqlite+aiosqlite:///{DB_DIR / 'forecaster.db'}"
 # ── Model constants (must match config.json / pipeline_fixed.py) ──────
 WINDOW_SIZE = 6
 N_FEATURES = 22
-HIDDEN_SIZE = 64
+HIDDEN_SIZE = 128
+NUM_LSTM_LAYERS = 2
+LSTM_DROPOUT = 0.2
 N_STAGES = 6
 STAGES = [
     "Benign", "Reconnaissance", "Initial Access",
@@ -41,6 +43,14 @@ DEFAULT_K_STEPS = 6
 DEFAULT_MC_SAMPLES = 20
 DEFAULT_MC_NOISE_STD = 0.05
 EMA_ALPHA = 0.4
+
+# ── Adaptive threshold ────────────────────────────────────────────────
+ADAPTIVE_THRESHOLD_ENABLED = os.environ.get("ADAPTIVE_THRESHOLD", "1") == "1"
+ADAPTIVE_EMA_ALPHA = 0.3
+ADAPTIVE_SIGMA_MULTIPLIER = 2.0
+
+# ── API key (optional — disabled if unset) ────────────────────────────
+API_KEY = os.environ.get("API_KEY", None)
 
 # ── CORS (Vercel frontend + local dev) ────────────────────────────────
 # BUG-05 fix: parse FRONTEND_URL as a comma-separated list so multiple

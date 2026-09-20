@@ -14,9 +14,11 @@ from .config import (
     CONFIG_PATH,
     FLOW_FEATURES,
     HIDDEN_SIZE,
+    LSTM_DROPOUT,
     MODEL_PATH,
     N_FEATURES,
     N_STAGES,
+    NUM_LSTM_LAYERS,
     SCALER_PATH,
     WINDOW_SIZE,
 )
@@ -24,21 +26,31 @@ from .config import (
 logger = logging.getLogger(__name__)
 
 
-# ── WorldModel architecture (exact copy from pipeline_fixed.py) ───────
+# ── WorldModel architecture — multi-layer LSTM with dropout ───────────
 class WorldModel(nn.Module):
     def __init__(self, n_features: int = N_FEATURES, hidden: int = HIDDEN_SIZE,
-                 n_stages: int = N_STAGES):
+                 n_stages: int = N_STAGES, num_layers: int = NUM_LSTM_LAYERS,
+                 dropout: float = LSTM_DROPOUT):
         super().__init__()
-        self.lstm = nn.LSTM(n_features, hidden, batch_first=True)
+        self.lstm = nn.LSTM(
+            n_features, hidden, num_layers=num_layers,
+            batch_first=True, dropout=dropout if num_layers > 1 else 0.0,
+        )
         self.next_state_head = nn.Linear(hidden, n_features)
         self.infiltration_head = nn.Sequential(
-            nn.Linear(hidden, 32), nn.ReLU(), nn.Linear(32, 1)
+            nn.Linear(hidden, 64), nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(64, 32), nn.ReLU(),
+            nn.Linear(32, 1),
         )
-        self.stage_head = nn.Linear(hidden, n_stages)
+        self.stage_head = nn.Sequential(
+            nn.Linear(hidden, 64), nn.ReLU(),
+            nn.Linear(64, n_stages),
+        )
 
     def forward(self, x: torch.Tensor):
         out, (h_n, _) = self.lstm(x)
-        h = h_n[-1]
+        h = h_n[-1]  # last layer's hidden state
         next_state = self.next_state_head(h)
         infiltration_logit = self.infiltration_head(h).squeeze(-1)
         stage_logits = self.stage_head(h)
@@ -54,6 +66,8 @@ class ModelArtifacts:
         self.config: dict | None = None
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self._loaded = False
+        # Cache scaler mean for SHAP background
+        self._scaler_mean: np.ndarray | None = None
 
     @property
     def is_loaded(self) -> bool:
@@ -103,6 +117,8 @@ class ModelArtifacts:
                     f"scaler.pkl fitted on {self.scaler.n_features_in_} features, "
                     f"expected {N_FEATURES}"
                 )
+        # Cache scaler mean as SHAP background sample (scaled space → zeros)
+        self._scaler_mean = np.zeros((1, N_FEATURES), dtype=np.float32)
         logger.info("  scaler.pkl: OK (n_features=%d)", N_FEATURES)
 
         # ── world_model.pt ────────────────────────────────────────────
@@ -110,7 +126,8 @@ class ModelArtifacts:
             raise FileNotFoundError(f"world_model.pt not found at {MODEL_PATH}")
 
         self.model = WorldModel(
-            n_features=N_FEATURES, hidden=HIDDEN_SIZE, n_stages=N_STAGES
+            n_features=N_FEATURES, hidden=HIDDEN_SIZE, n_stages=N_STAGES,
+            num_layers=NUM_LSTM_LAYERS, dropout=LSTM_DROPOUT,
         )
         state_dict = torch.load(MODEL_PATH, map_location=self.device, weights_only=True)
         self.model.load_state_dict(state_dict)
@@ -129,7 +146,8 @@ class ModelArtifacts:
         assert stage_logits.shape == (1, N_STAGES), \
             f"stage head shape {stage_logits.shape}, expected (1, {N_STAGES})"
 
-        logger.info("  world_model.pt: OK (dummy forward pass validated)")
+        logger.info("  world_model.pt: OK (hidden=%d, layers=%d, dropout=%.2f)",
+                     HIDDEN_SIZE, NUM_LSTM_LAYERS, LSTM_DROPOUT)
         self._loaded = True
         logger.info("All artifacts loaded successfully on device=%s", self.device)
 
@@ -138,6 +156,12 @@ class ModelArtifacts:
         if not self._loaded:
             raise RuntimeError("Artifacts not loaded — call load() first")
         return self.scaler.transform(raw_features)
+
+    def get_shap_background(self) -> np.ndarray:
+        """Return background data for SHAP KernelExplainer (scaler mean in scaled space = zeros)."""
+        if self._scaler_mean is None:
+            return np.zeros((1, N_FEATURES), dtype=np.float32)
+        return self._scaler_mean
 
 
 # ── Singleton ─────────────────────────────────────────────────────────
