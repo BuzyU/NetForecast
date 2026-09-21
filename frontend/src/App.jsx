@@ -113,12 +113,15 @@ function AppBadge({ appName, processName, iconType }) {
 function PacketStat({ fwdPkts, bwdPkts, bytesPerSec, proto }) {
   const tx = Math.round(fwdPkts || 0);
   const rx = Math.round(bwdPkts || 0);
+  const showSub = (proto && proto !== 'IP') || (bytesPerSec && bytesPerSec > 0);
   return (
     <div className="packet-stat">
       <span className="packet-stat-primary">TX: {tx} • RX: {rx}</span>
-      <span className="packet-stat-sub">
-        {proto || 'IP'}{bytesPerSec ? ` • ${(bytesPerSec / 1024).toFixed(1)} KB/s` : ''}
-      </span>
+      {showSub && (
+        <span className="packet-stat-sub">
+          {proto && proto !== 'IP' ? proto : ''}{bytesPerSec ? ` ${(bytesPerSec / 1024).toFixed(1)} KB/s` : ''}
+        </span>
+      )}
     </div>
   );
 }

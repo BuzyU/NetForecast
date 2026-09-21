@@ -1209,3 +1209,22 @@ a:hover { text-decoration: underline; }
   background: var(--bg-elevated);
 }
 
+.packet-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.packet-stat-primary {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+.packet-stat-sub {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
