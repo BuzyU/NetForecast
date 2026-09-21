@@ -2,10 +2,12 @@
 System control routes — Mode toggle (Live vs Simulated), simulator control,
 and simulated data purging.
 """
+import json
 import logging
 import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,7 +15,9 @@ from pydantic import BaseModel
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config import DB_DIR
 from ..database import AlertDB, FlowRecordDB, SessionDB, get_db
+from ..network_identity import get_host_identity
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/system", tags=["System"])
@@ -198,12 +202,6 @@ async def purge_simulated_data(db: AsyncSession = Depends(get_db)):
 # ═══════════════════════════════════════════════════════════════
 # CYCLE MANAGEMENT & WELLBEING ARCHIVAL
 # ═══════════════════════════════════════════════════════════════
-from datetime import datetime, timezone
-import json
-from pathlib import Path
-from ..config import DB_DIR, FLOW_FEATURES
-from ..network_identity import get_host_identity
-
 ARCHIVE_DIR = DB_DIR / "archives"
 ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -255,7 +253,8 @@ async def archive_and_reset_cycle(db: AsyncSession, reason: str = "manual") -> d
     Archive all active flows, sessions, and alerts into a timestamped JSON file,
     then clear active tables and reset in-memory buffers for a fresh cycle.
     """
-    from sqlalchemy import select, func
+    from sqlalchemy import func, select
+
     from ..ingestion import _session_buffers
 
     now = datetime.now(timezone.utc)

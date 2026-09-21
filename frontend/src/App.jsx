@@ -5,7 +5,7 @@ import {
 } from 'recharts';
 import {
   Activity, AlertTriangle, Shield, Upload, Radio,
-  Eye, ChevronRight, Check, MonitorDot, Database,
+  Eye, Check, MonitorDot, Database,
   Zap, Settings, BarChart3, Terminal,
   Wifi, ArrowDownToLine, ArrowUpFromLine,
   Network, FlaskConical, Globe, Cpu, Laptop,
