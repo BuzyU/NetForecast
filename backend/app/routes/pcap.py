@@ -2,20 +2,16 @@
 POST /ingest/pcap — parse PCAP network captures and ingest extracted flows.
 Uses Scapy for packet parsing and extracts all 22 CIC-IDS network features.
 """
-import io
 import logging
 import os
 import tempfile
-from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Optional
 
 import numpy as np
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..config import FLOW_FEATURES
 from ..database import get_db
 from ..ingestion import ingest_single_flow
 from ..schemas import FlowRecord, IngestResponse

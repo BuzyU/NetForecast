@@ -119,11 +119,11 @@ async def export_json(db: AsyncSession = Depends(get_db)):
     # 3. Alert stats
     total_alerts = (await db.execute(select(func.count(AlertDB.id)))).scalar_one() or 0
     unack_alerts = (await db.execute(
-        select(func.count(AlertDB.id)).where(AlertDB.acknowledged == False)
+        select(func.count(AlertDB.id)).where(AlertDB.acknowledged.is_(False))
     )).scalar_one() or 0
     critical_unack = (await db.execute(
         select(func.count(AlertDB.id)).where(
-            AlertDB.acknowledged == False, AlertDB.severity == "critical"
+            AlertDB.acknowledged.is_(False), AlertDB.severity == "critical"
         )
     )).scalar_one() or 0
 

@@ -5,10 +5,27 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .config import ALLOWED_ORIGINS, API_KEY, ARTIFACTS_DIR, FLOW_FEATURES, N_FEATURES, STAGES
+from .config import (
+    ALLOWED_ORIGINS,
+    API_KEY,
+    ARTIFACTS_DIR,
+    FLOW_FEATURES,
+    N_FEATURES,
+    STAGES,
+)
 from .database import init_db
 from .model_loader import artifacts
-from .routes import alerts, explain, forecast, ingest, pcap, predict, reports, system, ws
+from .routes import (
+    alerts,
+    explain,
+    forecast,
+    ingest,
+    pcap,
+    predict,
+    reports,
+    system,
+    ws,
+)
 from .schemas import HealthResponse
 
 logging.basicConfig(
