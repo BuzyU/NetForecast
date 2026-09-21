@@ -18,9 +18,9 @@ DATABASE_URL = f"sqlite+aiosqlite:///{DB_DIR / 'forecaster.db'}"
 # ── Model constants (must match config.json / pipeline_fixed.py) ──────
 WINDOW_SIZE = 6
 N_FEATURES = 22
-HIDDEN_SIZE = 128
+HIDDEN_SIZE = 256
 NUM_LSTM_LAYERS = 2
-LSTM_DROPOUT = 0.2
+LSTM_DROPOUT = 0.25
 N_STAGES = 6
 STAGES = [
     "Benign", "Reconnaissance", "Initial Access",

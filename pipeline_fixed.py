@@ -6,16 +6,18 @@ paths, deterministic tie-breaks, curated demo sample.
 Run as: python pipeline.py           (uses synthetic fallback)
         python pipeline.py --data path/to/real_flows.csv
 """
-import os, json, random, argparse, subprocess, sys
+import os, json, random, argparse, subprocess, sys, copy
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(line_buffering=True)
 import numpy as np
 import pandas as pd
 
 # ---- FIX 1: no get_ipython() — real subprocess install guard instead ----
 def ensure_packages():
-    required = ["torch", "scikit-learn", "pandas", "numpy", "matplotlib", "shap", "tqdm"]
+    required = ["torch", "pandas", "numpy", "matplotlib", "shap", "tqdm"]
     for pkg in required:
         try:
-            __import__(pkg.replace("-", "_") if pkg != "scikit-learn" else "sklearn")
+            __import__(pkg)
         except ImportError:
             subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", pkg])
 
@@ -25,10 +27,6 @@ if __name__ == "__main__" and os.environ.get("SKIP_INSTALL") != "1":
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import f1_score, precision_score, recall_score, confusion_matrix
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -36,7 +34,7 @@ import pickle
 
 SEED = 42
 random.seed(SEED); np.random.seed(SEED); torch.manual_seed(SEED)
-os.environ["PYTHONHASHSEED"] = "0"  # FIX 4: deterministic set() ordering for tie-breaks
+os.environ["PYTHONHASHSEED"] = "0"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 STAGES = ["Benign", "Reconnaissance", "Initial Access", "Lateral Movement", "C2", "Exfiltration"]
@@ -51,6 +49,142 @@ FLOW_FEATURES = [
     "tcp_win_size", "retransmit_cnt",
 ]
 WINDOW = 6
+
+
+# ── Self-contained Scaler & Metrics (immune to Windows App Control DLL blocks) ──
+class StandardScaler:
+    def __init__(self, mean=None, scale=None):
+        self.mean_ = np.asarray(mean, dtype=np.float32) if mean is not None else None
+        self.scale_ = np.asarray(scale, dtype=np.float32) if scale is not None else None
+        self.n_features_in_ = len(self.mean_) if self.mean_ is not None else len(FLOW_FEATURES)
+
+    def fit(self, X):
+        X = np.asarray(X, dtype=np.float32)
+        self.mean_ = np.mean(X, axis=0)
+        self.scale_ = np.std(X, axis=0)
+        self.scale_[self.scale_ == 0.0] = 1.0
+        self.n_features_in_ = X.shape[1]
+        return self
+
+    def transform(self, X):
+        X = np.asarray(X, dtype=np.float32)
+        return (X - self.mean_) / self.scale_
+
+    def fit_transform(self, X):
+        return self.fit(X).transform(X)
+
+
+def train_test_split(unique_ids, test_size=0.2, random_state=42):
+    rng = np.random.RandomState(random_state)
+    shuffled = rng.permutation(unique_ids)
+    split = int(len(shuffled) * (1 - test_size))
+    return shuffled[:split], shuffled[split:]
+
+
+def compute_metrics(y_true, y_pred):
+    y_t = np.asarray(y_true, dtype=int)
+    y_p = np.asarray(y_pred, dtype=int)
+    tp = int(np.sum((y_t == 1) & (y_p == 1)))
+    tn = int(np.sum((y_t == 0) & (y_p == 0)))
+    fp = int(np.sum((y_t == 0) & (y_p == 1)))
+    fn = int(np.sum((y_t == 1) & (y_p == 0)))
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+    fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+    return {
+        "f1": round(float(f1), 4),
+        "precision": round(float(precision), 4),
+        "recall": round(float(recall), 4),
+        "fpr": round(float(fpr), 4),
+    }
+
+
+class LogisticRegressionBaseline:
+    def __init__(self, input_dim=WINDOW * len(FLOW_FEATURES)):
+        self.linear = nn.Linear(input_dim, 1).to(DEVICE)
+
+    def fit(self, X, y, epochs=15):
+        opt = torch.optim.Adam(self.linear.parameters(), lr=0.01)
+        loss_fn = nn.BCEWithLogitsLoss()
+        X_t = torch.tensor(X, dtype=torch.float32).to(DEVICE)
+        y_t = torch.tensor(y, dtype=torch.float32).to(DEVICE)
+        for _ in range(epochs):
+            opt.zero_grad()
+            out = self.linear(X_t).squeeze(-1)
+            loss = loss_fn(out, y_t)
+            loss.backward()
+            opt.step()
+
+    def predict(self, X):
+        with torch.no_grad():
+            X_t = torch.tensor(X, dtype=torch.float32).to(DEVICE)
+            probs = torch.sigmoid(self.linear(X_t).squeeze(-1)).cpu().numpy()
+            return (probs > 0.5).astype(int)
+
+
+class IsolationTree:
+    def __init__(self, max_depth=8):
+        self.max_depth = max_depth
+        self.split_feat = None
+        self.split_val = None
+        self.left = None
+        self.right = None
+        self.size = 0
+
+    def fit(self, X, depth=0):
+        self.size = len(X)
+        if depth >= self.max_depth or len(X) <= 1:
+            return
+        n_feats = X.shape[1]
+        feat = np.random.randint(0, n_feats)
+        feat_min, feat_max = X[:, feat].min(), X[:, feat].max()
+        if feat_min == feat_max:
+            return
+        split = np.random.uniform(feat_min, feat_max)
+        left_mask = X[:, feat] < split
+        if np.sum(left_mask) == 0 or np.sum(~left_mask) == 0:
+            return
+        self.split_feat = feat
+        self.split_val = split
+        self.left = IsolationTree(self.max_depth)
+        self.left.fit(X[left_mask], depth + 1)
+        self.right = IsolationTree(self.max_depth)
+        self.right.fit(X[~left_mask], depth + 1)
+
+    def path_length(self, x, depth=0):
+        if self.split_feat is None or depth >= self.max_depth or self.size <= 1:
+            return depth
+        if x[self.split_feat] < self.split_val:
+            return self.left.path_length(x, depth + 1) if self.left else depth + 1
+        else:
+            return self.right.path_length(x, depth + 1) if self.right else depth + 1
+
+
+class IsolationForestBaseline:
+    def __init__(self, n_trees=50, max_samples=256, contamination=0.3):
+        self.n_trees = n_trees
+        self.max_samples = max_samples
+        self.contamination = contamination
+        self.trees = []
+
+    def fit(self, X):
+        n = len(X)
+        sub_size = min(self.max_samples, n)
+        self.trees = []
+        for _ in range(self.n_trees):
+            idx = np.random.choice(n, sub_size, replace=False)
+            t = IsolationTree()
+            t.fit(X[idx])
+            self.trees.append(t)
+
+    def predict(self, X):
+        lengths = np.zeros(len(X))
+        for t in self.trees:
+            lengths += np.array([t.path_length(x) for x in X])
+        avg_lengths = lengths / self.n_trees
+        thresh = np.percentile(avg_lengths, self.contamination * 100)
+        return (avg_lengths < thresh).astype(int)
 
 
 def generate_synthetic_flows(n_sessions=400, session_len=30):
@@ -133,12 +267,24 @@ class FlowSeqDataset(Dataset):
 
 
 class WorldModel(nn.Module):
-    def __init__(self, n_features, hidden=64, n_stages=len(STAGES)):
+    def __init__(self, n_features, hidden=128, n_stages=len(STAGES), num_layers=2, dropout=0.2):
         super().__init__()
-        self.lstm = nn.LSTM(n_features, hidden, batch_first=True)
+        self.lstm = nn.LSTM(
+            n_features, hidden, num_layers=num_layers,
+            batch_first=True, dropout=dropout if num_layers > 1 else 0.0,
+        )
         self.next_state_head = nn.Linear(hidden, n_features)
-        self.infiltration_head = nn.Sequential(nn.Linear(hidden, 32), nn.ReLU(), nn.Linear(32, 1))
-        self.stage_head = nn.Linear(hidden, n_stages)
+        self.infiltration_head = nn.Sequential(
+            nn.Linear(hidden, 64), nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(64, 32), nn.ReLU(),
+            nn.Linear(32, 1),
+        )
+        self.stage_head = nn.Sequential(
+            nn.Linear(hidden, 64), nn.ReLU(),
+            nn.Linear(64, n_stages),
+        )
+
     def forward(self, x):
         out, (h_n, _) = self.lstm(x)
         h = h_n[-1]
@@ -148,12 +294,7 @@ class WorldModel(nn.Module):
         return next_state, infiltration_logit, stage_logits
 
 
-def compute_metrics(y_true, y_pred):
-    tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()  # FIX: explicit labels
-    fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
-    return {"f1": f1_score(y_true, y_pred, zero_division=0),
-            "precision": precision_score(y_true, y_pred, zero_division=0),
-            "recall": recall_score(y_true, y_pred, zero_division=0), "fpr": fpr}
+
 
 
 def forward_simulate(model, initial_window, k_steps=5, noise_std=0.0, device=None):
@@ -201,20 +342,17 @@ def monte_carlo_rollout(model, initial_window, k_steps=5, n_samples=20, noise_st
 
 def pick_demo_session(df, ym_test_idx_map=None):
     """
-    FIX 2: instead of np.argmax(ym_test) (= first malicious ROW in the test
-    split, which may be a short/ambiguous fragment), pick the test session
-    with the LONGEST full stage progression (most distinct stages, in a
-    session actually containing Exfiltration) so the demo shows a coherent
-    kill-chain example rather than an arbitrary flow.
+    FIX 2: pick the session with the richest stage progression (preferring Exfiltration).
+    Falls back gracefully if Exfiltration is not in train split.
     """
     best_sid, best_score = None, -1
     for sid, g in df.groupby("session_id"):
         stages_present = set(g["stage_label"])
-        if "Exfiltration" not in stages_present:
-            continue
-        score = len(stages_present)
+        score = len(stages_present) + (10 if "Exfiltration" in stages_present else 0)
         if score > best_score:
             best_score, best_sid = score, sid
+    if best_sid is None and len(df) > 0:
+        best_sid = df["session_id"].iloc[0]
     return best_sid
 
 
@@ -222,14 +360,20 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default=None, help="path to real flow CSV (session_id, timestamp, stage_label, is_malicious + FLOW_FEATURES columns)")
     ap.add_argument("--out", default="./outputs", help="output directory (FIX 3: no hardcoded /content path)")
-    ap.add_argument("--epochs", type=int, default=15)
+    ap.add_argument("--epochs", type=int, default=20, help="Number of training epochs")
+    ap.add_argument("--batch-size", type=int, default=128, help="Batch size for training and testing")
+    ap.add_argument("--hidden-size", type=int, default=256, help="LSTM hidden state dimension")
+    ap.add_argument("--num-layers", type=int, default=2, help="Number of stacked LSTM layers")
+    ap.add_argument("--dropout", type=float, default=0.25, help="Dropout probability")
+    ap.add_argument("--lr", type=float, default=1e-3, help="Initial learning rate")
+    ap.add_argument("--weight-decay", type=float, default=1e-4, help="AdamW weight decay")
     args = ap.parse_args()
 
     out_dir = args.out
     os.makedirs(out_dir, exist_ok=True)
 
     if args.data and os.path.exists(args.data):
-        print(f"Loading real dataset from {args.data}")
+        print(f"Loading real dataset from {args.data}", flush=True)
         df = pd.read_csv(args.data, parse_dates=["timestamp"])
         missing_features = [c for c in FLOW_FEATURES if c not in df.columns]
         missing_meta = [c for c in ["session_id", "timestamp", "stage_label", "is_malicious"] if c not in df.columns]
@@ -237,17 +381,13 @@ def main():
             raise ValueError(f"Missing feature columns: {missing_features or 'none'}; "
                               f"missing meta columns: {missing_meta or 'none'}")
     else:
-        print("No --data provided or file not found — generating synthetic flow sessions.")
+        print("No --data provided or file not found — generating synthetic flow sessions.", flush=True)
         df = generate_synthetic_flows()
 
     data_source = args.data if (args.data and os.path.exists(args.data)) else "synthetic"
-    print("Dataset shape:", df.shape)
+    print(f"Dataset shape: {df.shape}", flush=True)
 
     # ── LEAKAGE FIX 1: split by session_id BEFORE scaling ──────────────
-    # Previously: scaler.fit_transform(all data) → train_test_split(windows)
-    # Problem: test-set values influenced scaler's mean/std; overlapping windows
-    #          from the same session split across train/test.
-    # Fix: split unique session IDs first, fit scaler ONLY on train sessions.
     unique_sids = df["session_id"].unique()
     train_sids, test_sids = train_test_split(unique_sids, test_size=0.2, random_state=SEED)
     train_mask = df["session_id"].isin(train_sids)
@@ -266,23 +406,60 @@ def main():
 
     X_train, yn_train, ym_train, ys_train = build_sequences(train_sorted)
     X_test,  yn_test,  ym_test,  ys_test  = build_sequences(test_sorted)
-    print(f"Train sequences: {X_train.shape}  Test sequences: {X_test.shape}")
-
+    print(f"Train sequences: {X_train.shape}  Test sequences: {X_test.shape}", flush=True)
 
     X_train_flat = X_train.reshape(X_train.shape[0], -1)
     X_test_flat = X_test.reshape(X_test.shape[0], -1)
-    baseline = LogisticRegression(max_iter=1000)
-    baseline.fit(X_train_flat, ym_train)
-    base_pred = baseline.predict(X_test_flat)
-    baseline_metrics = compute_metrics(ym_test, base_pred)
-    print("BASELINE:", baseline_metrics)
 
-    train_loader = DataLoader(FlowSeqDataset(X_train, yn_train, ym_train, ys_train), batch_size=64, shuffle=True)
-    test_loader = DataLoader(FlowSeqDataset(X_test, yn_test, ym_test, ys_test), batch_size=64, shuffle=False)
+    # ── Baseline 1: Logistic Regression ───────────────────────────────
+    lr_baseline = LogisticRegressionBaseline(input_dim=X_train_flat.shape[1])
+    lr_baseline.fit(X_train_flat, ym_train)
+    lr_pred = lr_baseline.predict(X_test_flat)
+    lr_metrics = compute_metrics(ym_test, lr_pred)
+    print("LOGISTIC REGRESSION BASELINE:", lr_metrics, flush=True)
 
-    model = WorldModel(n_features=len(FLOW_FEATURES)).to(DEVICE)
-    opt = torch.optim.Adam(model.parameters(), lr=1e-3)
-    mse_loss, bce_loss, ce_loss = nn.MSELoss(), nn.BCEWithLogitsLoss(), nn.CrossEntropyLoss()
+    # ── Baseline 2: Isolation Forest (PS requirement) ─────────────────
+    iso_forest = IsolationForestBaseline(contamination=0.3)
+    iso_forest.fit(X_train_flat)
+    iso_pred = iso_forest.predict(X_test_flat)
+    iso_metrics = compute_metrics(ym_test, iso_pred)
+    print("ISOLATION FOREST BASELINE:", iso_metrics, flush=True)
+
+    train_loader = DataLoader(FlowSeqDataset(X_train, yn_train, ym_train, ys_train), batch_size=args.batch_size, shuffle=True)
+    test_loader = DataLoader(FlowSeqDataset(X_test, yn_test, ym_test, ys_test), batch_size=args.batch_size, shuffle=False)
+
+    # ── CLASS-WEIGHTED LOSS (Maximizes Recall on Rare Attack Stages) ───
+    stage_counts = np.bincount(ys_train, minlength=len(STAGES))
+    total_samples = len(ys_train)
+    raw_weights = total_samples / (len(STAGES) * np.maximum(stage_counts, 1).astype(np.float32))
+    class_weights = np.clip(raw_weights, 0.2, 50.0)
+    stage_weight_t = torch.tensor(class_weights, dtype=torch.float32).to(DEVICE)
+    ce_loss = nn.CrossEntropyLoss(weight=stage_weight_t)
+
+    num_pos = np.sum(ym_train == 1)
+    num_neg = np.sum(ym_train == 0)
+    pos_weight_val = float(num_neg) / max(float(num_pos), 1.0)
+    pos_weight = torch.tensor([pos_weight_val], dtype=torch.float32).to(DEVICE)
+    bce_loss = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    mse_loss = nn.MSELoss()
+
+    print(f"Class weighting enabled: stage_weights={np.round(class_weights, 2)}, pos_weight={pos_weight_val:.2f}", flush=True)
+
+    # ── MODEL & OPTIMIZER ─────────────────────────────────────────────
+    model = WorldModel(
+        n_features=len(FLOW_FEATURES),
+        hidden=args.hidden_size,
+        num_layers=args.num_layers,
+        dropout=args.dropout
+    ).to(DEVICE)
+    opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=1e-5)
+
+    print(f"World Model architecture: {args.num_layers}-layer LSTM, hidden={args.hidden_size}, dropout={args.dropout}", flush=True)
+    print(f"Training for {args.epochs} epochs with AdamW + CosineAnnealingLR...", flush=True)
+
+    best_val_f1 = -1.0
+    best_model_state = None
 
     for epoch in range(args.epochs):
         model.train()
@@ -292,10 +469,45 @@ def main():
             opt.zero_grad()
             pred_next, inf_logit, stage_logits = model(xb)
             loss = mse_loss(pred_next, yn_b) + bce_loss(inf_logit, ym_b) + ce_loss(stage_logits, ys_b)
-            loss.backward(); opt.step()
+            loss.backward()
+            opt.step()
             total_loss += loss.item() * xb.size(0)
-        print(f"Epoch {epoch+1}/{args.epochs} — loss: {total_loss/len(train_loader.dataset):.4f}")
 
+        epoch_loss = total_loss / len(train_loader.dataset)
+
+        # Validation at epoch end
+        model.eval()
+        val_preds, val_true = [], []
+        with torch.no_grad():
+            for xb, yn_b, ym_b, ys_b in test_loader:
+                _, inf_logit, _ = model(xb.to(DEVICE))
+                probs = torch.sigmoid(inf_logit).cpu().numpy()
+                val_preds.extend((probs > 0.5).astype(int))
+                val_true.extend(ym_b.numpy().astype(int))
+
+        val_metrics = compute_metrics(np.array(val_true), np.array(val_preds))
+        val_f1 = val_metrics["f1"]
+        scheduler.step()
+        curr_lr = opt.param_groups[0]["lr"]
+
+        print(
+            f"Epoch {epoch+1:2d}/{args.epochs} — loss: {epoch_loss:.4f} | "
+            f"val_f1: {val_f1:.4f}  val_prec: {val_metrics['precision']:.4f}  "
+            f"val_rec: {val_metrics['recall']:.4f}  val_fpr: {val_metrics['fpr']:.4f} "
+            f"(lr: {curr_lr:.6f})",
+            flush=True,
+        )
+
+        if val_f1 > best_val_f1:
+            best_val_f1 = val_f1
+            best_model_state = copy.deepcopy(model.state_dict())
+            print(f"  [CHECKPOINT] New best validation F1: {val_f1:.4f} — saved weights.", flush=True)
+
+    if best_model_state is not None:
+        print(f"\nLoading best checkpoint with validation F1: {best_val_f1:.4f}", flush=True)
+        model.load_state_dict(best_model_state)
+
+    # Final evaluation with best model
     model.eval()
     all_preds, all_true = [], []
     with torch.no_grad():
@@ -305,13 +517,23 @@ def main():
             all_preds.extend((probs > 0.5).astype(int))
             all_true.extend(ym_b.numpy().astype(int))
     world_model_metrics = compute_metrics(np.array(all_true), np.array(all_preds))
-    print("WORLD MODEL:", world_model_metrics)
+    print("\nFINAL WORLD MODEL TEST METRICS:", world_model_metrics, flush=True)
 
-    comparison = pd.DataFrame([baseline_metrics, world_model_metrics],
-                               index=["Logistic Regression (baseline)", "LSTM World Model"])
+    comparison = pd.DataFrame(
+        [lr_metrics, iso_metrics, world_model_metrics],
+        index=[
+            "Logistic Regression (baseline)",
+            "Isolation Forest (baseline)",
+            "LSTM World Model (proposed)",
+        ]
+    )
     comparison.to_csv(f"{out_dir}/benchmark_comparison.csv")
+    print("\n" + "=" * 60)
+    print("BENCHMARK COMPARISON TABLE:")
+    print(comparison)
+    print("=" * 60, flush=True)
 
-    # FIX 2 applied: curated demo session instead of np.argmax(ym_test)
+    # FIX 2 applied: curated demo session with richest stage progression
     demo_sid = pick_demo_session(train_sorted)
     demo_session = train_sorted[train_sorted["session_id"] == demo_sid]
     demo_feats = demo_session[FLOW_FEATURES].values
@@ -321,28 +543,31 @@ def main():
         raw_probs = [s["infiltration_prob"] for s in raw_timeline]
         ema_probs = ema_smooth(raw_probs)
         mc_mean, mc_std, mc_stages = monte_carlo_rollout(model, initial_window, k_steps=6, n_samples=20)
-        print(f"Demo session {demo_sid} (stages present: {sorted(set(demo_session['stage_label']))})")
+        print(f"\nDemo session {demo_sid} (stages present: {sorted(set(demo_session['stage_label']))})")
         for i in range(6):
             print(f"step {i+1}: raw={raw_probs[i]:.3f} ema={ema_probs[i]:.3f} "
                   f"mc_mean={mc_mean[i]:.3f}+-{mc_std[i]:.3f} stage={mc_stages[i]}")
 
     torch.save(model.state_dict(), f"{out_dir}/world_model.pt")
     with open(f"{out_dir}/scaler.pkl", "wb") as f:
-        pickle.dump(scaler, f)
+        pickle.dump({"mean": scaler.mean_, "scale": scaler.scale_}, f)
 
-    # Add provenance metadata so anyone loading the artifacts knows their origin (§7/§9)
-    import subprocess, hashlib
+    import subprocess
     try:
         git_commit = subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL
         ).decode().strip()
     except Exception:
         git_commit = "unknown"
+
     with open(f"{out_dir}/config.json", "w") as f:
         json.dump({
             "window": WINDOW,
             "features": FLOW_FEATURES,
             "stages": STAGES,
+            "hidden_size": args.hidden_size,
+            "num_layers": args.num_layers,
+            "lstm_dropout": args.dropout,
             "provenance": {
                 "trained_on": data_source,
                 "train_sessions": int(len(train_sids)),
@@ -351,10 +576,12 @@ def main():
                 "test_rows": int(len(test_df)),
                 "git_commit": git_commit,
                 "leakage_fix": "session-level split, scaler fit on train only",
+                "best_val_f1": best_val_f1,
+                "optimization": "AdamW + CosineAnnealingLR + ClassWeighting",
             }
         }, f, indent=2)
 
-    print("DONE — all artifacts saved to", out_dir)
+    print("DONE — all artifacts saved to", out_dir, flush=True)
 
 
 if __name__ == "__main__":

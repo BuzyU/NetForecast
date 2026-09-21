@@ -135,6 +135,9 @@ class ExplainRequest(BaseModel):
     needs_scaling: bool = Field(
         default=False, description="Whether raw features should be scaled before inference"
     )
+    method: str = Field(
+        default="shap", description="Attribution method: 'shap' or 'gradient'"
+    )
 
     @field_validator("window")
     @classmethod
@@ -157,6 +160,7 @@ class ExplainResponse(BaseModel):
     attributions: list[FeatureAttribution]
     infiltration_probability: float
     predicted_stage: str
+    method_used: str = "shap"
 
 
 # ── Alert models ─────────────────────────────────────────────────────

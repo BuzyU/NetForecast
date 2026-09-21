@@ -719,7 +719,9 @@ function ForecastView({ session, onBack, featureList }) {
         <div className="panel">
           <div className="panel-header">
             <span className="panel-title">FEATURE_ATTRIBUTION</span>
-            <span className="panel-meta">Gradient &times; Input</span>
+            <span className="panel-meta">
+              {explanation?.method_used === 'shap' ? 'SHAP Values (KernelExplainer)' : 'Gradient × Input'}
+            </span>
           </div>
           <div className="panel-body">
             {explanation && (
@@ -1016,13 +1018,14 @@ function AlertsView() {
 
 
 // ═══════════════════════════════════════════════════════════════
-// EXPLAIN VIEW — standalone feature attribution
+// EXPLAIN VIEW — feature attribution (SHAP + Gradient)
 // ═══════════════════════════════════════════════════════════════
 function ExplainView({ featureList }) {
   const [sessions, setSessions] = useState([]);
   const [selected, setSelected] = useState(null);
   const [explanation, setExplanation] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [method, setMethod] = useState('shap');
 
   const featOrder = featureList || DEFAULT_FEAT_ORDER;
 
@@ -1030,17 +1033,24 @@ function ExplainView({ featureList }) {
     apiFetch('/sessions?limit=50').then(setSessions).catch(() => {});
   }, []);
 
-  const explain = (session) => {
+  const explain = (session, methodToUse = method) => {
     setSelected(session);
     setLoading(true);
     apiFetch(`/sessions/${encodeURIComponent(session.session_key)}/flows?limit=6`)
       .then(flows => {
         if (flows.length < 6) throw new Error('Need 6+ flows');
         const window = flows.slice(0, 6).reverse().map(f => featOrder.map(k => f.features?.[k] ?? 0));
-        return apiPost('/explain', { window, top_k: 22, needs_scaling: true });
+        return apiPost('/explain', { window, top_k: 22, needs_scaling: true, method: methodToUse });
       })
       .then(result => { setExplanation(result); setLoading(false); })
       .catch(() => { setLoading(false); });
+  };
+
+  const handleMethodChange = (newMethod) => {
+    setMethod(newMethod);
+    if (selected) {
+      explain(selected, newMethod);
+    }
   };
 
   const maxImp = explanation?.attributions
@@ -1078,13 +1088,33 @@ function ExplainView({ featureList }) {
 
       {/* Attribution display */}
       <div className="panel">
-        <div className="panel-header">
-          <span className="panel-title">FEATURE_ATTRIBUTION</span>
-          <span className="panel-meta">Gradient &times; Input (all 22 features)</span>
+        <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <span className="panel-title">FEATURE_ATTRIBUTION</span>
+            <span className="panel-meta" style={{ marginLeft: 'var(--sp-2)' }}>
+              {explanation?.method_used === 'shap' ? 'SHAP Values (KernelExplainer)' : 'Gradient × Input'} (all 22 features)
+            </span>
+          </div>
+          <div style={{ display: 'inline-flex', gap: 4, background: 'var(--surface)', padding: 2, borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
+            <button
+              className={`btn btn-sm ${method === 'shap' ? 'btn-primary' : ''}`}
+              onClick={() => handleMethodChange('shap')}
+              style={{ fontSize: '0.65rem', padding: '2px 8px' }}
+            >
+              SHAP
+            </button>
+            <button
+              className={`btn btn-sm ${method === 'gradient' ? 'btn-primary' : ''}`}
+              onClick={() => handleMethodChange('gradient')}
+              style={{ fontSize: '0.65rem', padding: '2px 8px' }}
+            >
+              GRADIENT
+            </button>
+          </div>
         </div>
         <div className="panel-body">
           {loading ? (
-            <div className="empty-state"><div className="loading-spinner"/><p>Computing attributions...</p></div>
+            <div className="empty-state"><div className="loading-spinner"/><p>Computing {method.toUpperCase()} attributions...</p></div>
           ) : !explanation ? (
             <div className="empty-state"><Eye size={28} color="var(--text-muted)"/><p>Select a session to explain.</p></div>
           ) : (
@@ -1095,6 +1125,9 @@ function ExplainView({ featureList }) {
                   <span className="text-sm text-muted" style={{ marginLeft: 'var(--sp-2)' }}>P(INFILTRATION)</span>
                 </div>
                 <span className={`stage-badge ${stageClass(explanation.predicted_stage)}`}>{explanation.predicted_stage}</span>
+                <span className="mono text-muted" style={{ fontSize: '0.65rem', marginLeft: 'auto' }}>
+                  METHOD: {explanation.method_used?.toUpperCase()}
+                </span>
               </div>
               <div className="shap-bar-container">
                 {explanation.attributions.map((attr, i) => (
@@ -1167,9 +1200,23 @@ function ReportsView() {
 
   return (
     <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-4)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-4)', flexWrap: 'wrap', gap: 'var(--sp-2)' }}>
         <span className="section-label" style={{ marginBottom: 0 }}>SYSTEM_REPORT</span>
-        <button className="btn btn-sm" onClick={copySummary}>COPY JSON</button>
+        <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+          <button
+            className="btn btn-sm"
+            onClick={() => window.open(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/reports/export/csv`, '_blank')}
+          >
+            EXPORT CSV
+          </button>
+          <button
+            className="btn btn-sm"
+            onClick={() => window.open(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/reports/export/json`, '_blank')}
+          >
+            EXPORT JSON
+          </button>
+          <button className="btn btn-sm" onClick={copySummary}>COPY JSON</button>
+        </div>
       </div>
 
       <div className="report-grid">
@@ -1367,12 +1414,12 @@ function SettingsView({
           <span className="panel-title">MODEL_INFO</span>
         </div>
         <div className="panel-body">
-          <div className="settings-row"><span className="settings-key">ARCHITECTURE</span><span className="settings-val">LSTM (hidden=64)</span></div>
+          <div className="settings-row"><span className="settings-key">ARCHITECTURE</span><span className="settings-val">2-Layer LSTM (hidden=128, dropout=0.2)</span></div>
           <div className="settings-row"><span className="settings-key">DEVICE</span><span className="settings-val">{health?.device?.toUpperCase() || 'CPU'}</span></div>
           <div className="settings-row"><span className="settings-key">FEATURES</span><span className="settings-val">{health?.features_count || 22}</span></div>
           <div className="settings-row"><span className="settings-key">WINDOW_SIZE</span><span className="settings-val">6</span></div>
           <div className="settings-row"><span className="settings-key">STAGES</span><span className="settings-val">{health?.stages?.length || 6}</span></div>
-          <div className="settings-row"><span className="settings-key">ALERT_THRESHOLD</span><span className="settings-val">0.50</span></div>
+          <div className="settings-row"><span className="settings-key">ALERT_THRESHOLD</span><span className="settings-val">0.50 (Adaptive EMA enabled)</span></div>
           <div className="settings-row"><span className="settings-key">MC_SAMPLES</span><span className="settings-val">20</span></div>
           <div className="settings-row"><span className="settings-key">EMA_ALPHA</span><span className="settings-val">0.40</span></div>
         </div>
@@ -1416,7 +1463,7 @@ function SettingsView({
 
 
 // ═══════════════════════════════════════════════════════════════
-// INGEST — CSV upload
+// INGEST — CSV or PCAP upload
 // ═══════════════════════════════════════════════════════════════
 function IngestPanel() {
   const [result, setResult] = useState(null);
@@ -1425,14 +1472,21 @@ function IngestPanel() {
   const fileRef = useRef(null);
 
   const handleFile = async (file) => {
-    if (!file || !file.name.endsWith('.csv')) {
-      setResult({ error: 'Please upload a CSV file' });
+    if (!file) return;
+    const name = file.name.toLowerCase();
+    const isCsv = name.endsWith('.csv');
+    const isPcap = name.endsWith('.pcap') || name.endsWith('.cap') || name.endsWith('.pcapng');
+
+    if (!isCsv && !isPcap) {
+      setResult({ error: 'Please upload a CSV (.csv) or PCAP (.pcap, .cap, .pcapng) file' });
       return;
     }
+
     setUploading(true);
     setResult(null);
     try {
-      const data = await apiUpload('/ingest/csv', file);
+      const endpoint = isPcap ? '/ingest/pcap' : '/ingest/csv';
+      const data = await apiUpload(endpoint, file);
       setResult(data);
     } catch (e) {
       setResult({ error: e.message });
@@ -1449,9 +1503,10 @@ function IngestPanel() {
   return (
     <>
       <div style={{ marginBottom: 'var(--sp-4)' }}>
-        <span className="section-label">INGEST_FLOW_DATA</span>
+        <span className="section-label">INGEST_NETWORK_TELEMETRY</span>
         <p className="mono text-sm" style={{ color: 'var(--text-secondary)', marginTop: 'var(--sp-1)' }}>
-          Upload a CSV with the 22 CIC-IDS features. Include <strong>src_ip</strong>, <strong>dst_ip</strong>, <strong>timestamp</strong> for session grouping.
+          Upload <strong>CSV flow logs</strong> (22 CIC-IDS features) or raw <strong>PCAP packet captures</strong> (.pcap/.pcapng).
+          The engine extracts temporal features, reconstructs sessions, and forecasts attack progression.
         </p>
       </div>
 
@@ -1463,11 +1518,17 @@ function IngestPanel() {
         onDragLeave={() => setDragging(false)}
       >
         {uploading ? (
-          <><div className="loading-spinner" style={{ margin: '0 auto var(--sp-2)' }}/><p>Processing...</p></>
+          <><div className="loading-spinner" style={{ margin: '0 auto var(--sp-2)' }}/><p>Processing network telemetry...</p></>
         ) : (
-          <><Upload size={26} className="upload-icon"/><p>Drop a CSV file here or click to browse</p></>
+          <><Upload size={26} className="upload-icon"/><p>Drop a CSV or PCAP file here or click to browse</p></>
         )}
-        <input ref={fileRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={e => handleFile(e.target.files[0])}/>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".csv,.pcap,.cap,.pcapng"
+          style={{ display: 'none' }}
+          onChange={e => handleFile(e.target.files[0])}
+        />
       </div>
 
       {result && (

@@ -20,6 +20,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import (
+    ADAPTIVE_EMA_ALPHA,
+    ADAPTIVE_SIGMA_MULTIPLIER,
+    ADAPTIVE_THRESHOLD_ENABLED,
     DEFAULT_THRESHOLD,
     FLOW_FEATURES,
     SESSION_TIME_BUCKET_SECONDS,
@@ -259,15 +262,38 @@ async def ingest_single_flow(
         db_record.infiltration_prob = prediction["infiltration_probability"]
         db_record.predicted_stage = predicted_stage
 
+        # ── Determine alert status (with Adaptive Threshold support) ──
+        prob = prediction["infiltration_probability"]
+        effective_threshold = DEFAULT_THRESHOLD
+        is_alert = prediction["is_alert"]
+
+        if ADAPTIVE_THRESHOLD_ENABLED:
+            prev_ema = buf.get("prob_ema")
+            if prev_ema is None:
+                buf["prob_ema"] = prob
+                buf["prob_var"] = 0.0
+            else:
+                diff = prob - prev_ema
+                buf["prob_ema"] = (1 - ADAPTIVE_EMA_ALPHA) * prev_ema + ADAPTIVE_EMA_ALPHA * prob
+                buf["prob_var"] = (1 - ADAPTIVE_EMA_ALPHA) * buf.get("prob_var", 0.0) + ADAPTIVE_EMA_ALPHA * (diff ** 2)
+
+            std = float(np.sqrt(max(0.0, buf.get("prob_var", 0.0))))
+            adaptive_thresh = min(0.95, max(DEFAULT_THRESHOLD, buf["prob_ema"] + ADAPTIVE_SIGMA_MULTIPLIER * std))
+            effective_threshold = round(adaptive_thresh, 4)
+            is_alert = prob > effective_threshold
+
+        prediction["is_alert"] = is_alert
+        prediction["effective_threshold"] = effective_threshold
+
         # ── Create alert if threshold exceeded ────────────────────
-        if prediction["is_alert"]:
-            severity = _severity_from_prob(prediction["infiltration_probability"])
+        if is_alert:
+            severity = _severity_from_prob(prob)
             action = _recommended_action(predicted_stage, session_key)
 
             alert = AlertDB(
                 session_key=session_key,
                 severity=severity,
-                infiltration_prob=prediction["infiltration_probability"],
+                infiltration_prob=prob,
                 predicted_stage=predicted_stage,
                 recommended_action=action,
                 created_at=now,
@@ -276,8 +302,9 @@ async def ingest_single_flow(
             result_data["alert"] = {
                 "severity": severity,
                 "predicted_stage": predicted_stage,
-                "infiltration_prob": prediction["infiltration_probability"],
+                "infiltration_prob": prob,
                 "recommended_action": action,
+                "effective_threshold": effective_threshold,
             }
 
     await db.commit()

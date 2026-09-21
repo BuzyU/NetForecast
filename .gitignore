@@ -31,7 +31,10 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Raw dataset downloads (keep benchmark_comparison.csv)
+# Raw dataset downloads and large flow files (keep benchmark_comparison.csv)
 data/raw/
+data/raw_cicids/
+real_flows.csv
 data/*.pcap
 data/*.pcapng
+*.tmp

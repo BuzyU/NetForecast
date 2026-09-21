@@ -1,13 +1,14 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
-from .config import ALLOWED_ORIGINS, ARTIFACTS_DIR, FLOW_FEATURES, N_FEATURES, STAGES
+from .config import ALLOWED_ORIGINS, API_KEY, ARTIFACTS_DIR, FLOW_FEATURES, N_FEATURES, STAGES
 from .database import init_db
 from .model_loader import artifacts
-from .routes import alerts, explain, forecast, ingest, predict, system, ws
+from .routes import alerts, explain, forecast, ingest, pcap, predict, reports, system, ws
 from .schemas import HealthResponse
 
 logging.basicConfig(
@@ -84,11 +85,42 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Rate limiting (SlowAPI) ───────────────────────────────────────────
+try:
+    from slowapi import Limiter, _rate_limit_exceeded_handler
+    from slowapi.errors import RateLimitExceeded
+    from slowapi.middleware import SlowAPIMiddleware
+    from slowapi.util import get_remote_address
+
+    limiter = Limiter(key_func=get_remote_address, default_limits=["120/minute"])
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_middleware(SlowAPIMiddleware)
+    logger.info("SlowAPI rate limiter enabled (120 req/min default)")
+except ImportError:
+    logger.info("SlowAPI not installed — proceeding without rate limiter")
+
+
+# ── Optional API Key Authentication ──────────────────────────────────
+@app.middleware("http")
+async def api_key_auth_middleware(request: Request, call_next):
+    if API_KEY and not request.url.path.startswith(("/health", "/docs", "/openapi.json", "/redoc", "/ws")):
+        key = request.headers.get("X-API-Key")
+        if key != API_KEY:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Unauthorized: Invalid or missing X-API-Key header"},
+            )
+    return await call_next(request)
+
+
 app.include_router(predict.router, tags=["Prediction"])
 app.include_router(forecast.router, tags=["Forecasting"])
 app.include_router(explain.router, tags=["Explainability"])
 app.include_router(alerts.router, tags=["Alerts"])
 app.include_router(ingest.router, tags=["Ingestion"])
+app.include_router(pcap.router, tags=["PCAP Ingestion"])
+app.include_router(reports.router, tags=["Reports"])
 app.include_router(system.router, tags=["System"])
 app.include_router(ws.router, tags=["Live Feed"])
 

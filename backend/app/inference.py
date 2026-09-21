@@ -173,4 +173,80 @@ def explain_window(window: np.ndarray, top_k: int = 10) -> dict:
         "attributions": result,
         "infiltration_probability": pred["infiltration_probability"],
         "predicted_stage": pred["predicted_stage"],
+        "method_used": "gradient",
+    }
+
+
+def explain_window_shap(
+    window: np.ndarray,
+    top_k: int = 10,
+    n_samples: int = 50,
+) -> dict:
+    """
+    Compute SHAP (Shapley Additive exPlanations) values for the input window.
+    Uses KernelExplainer with a baseline background to attribute infiltration
+    probability to individual features.
+    Falls back gracefully to gradient attribution if SHAP encounters an issue.
+    """
+    _ensure_loaded()
+    model = artifacts.model
+    device = artifacts.device
+
+    try:
+        import shap
+
+        # Model prediction function: maps flat (N, 6 * 22) -> (N,) probabilities
+        def predict_fn(flat_windows: np.ndarray) -> np.ndarray:
+            x_tensor = torch.tensor(
+                flat_windows.reshape(-1, WINDOW_SIZE, N_FEATURES),
+                dtype=torch.float32,
+            ).to(device)
+            with torch.no_grad():
+                _, inf_logit, _ = model(x_tensor)
+                probs = torch.sigmoid(inf_logit).cpu().numpy()
+            return probs
+
+        # Background reference: zero baseline
+        background = np.zeros((1, WINDOW_SIZE * N_FEATURES), dtype=np.float32)
+        explainer = shap.KernelExplainer(predict_fn, background)
+
+        flat_input = window.reshape(1, WINDOW_SIZE * N_FEATURES)
+        shap_vals = explainer.shap_values(
+            flat_input, nsamples=n_samples, l1_reg="num_features(10)", silent=True
+        )
+
+        if isinstance(shap_vals, list):
+            vals = shap_vals[0]
+        else:
+            vals = shap_vals
+
+        # Reshape to (WINDOW_SIZE, N_FEATURES) and average across time steps
+        val_grid = np.array(vals).reshape(WINDOW_SIZE, N_FEATURES)
+        attributions = val_grid.mean(axis=0)
+        method_used = "shap"
+    except Exception as e:
+        logger.warning("SHAP explanation failed (%s), falling back to gradient attribution", e)
+        res = explain_window(window, top_k=top_k)
+        res["method_used"] = "gradient_fallback"
+        return res
+
+    indices = np.argsort(np.abs(attributions))[::-1][:top_k]
+    from .config import FLOW_FEATURES
+
+    result = []
+    for idx in indices:
+        val = float(attributions[idx])
+        result.append({
+            "feature": FLOW_FEATURES[idx],
+            "importance": round(val, 6),
+            "direction": "malicious" if val > 0 else "benign",
+        })
+
+    pred = predict_single(window)
+
+    return {
+        "attributions": result,
+        "infiltration_probability": pred["infiltration_probability"],
+        "predicted_stage": pred["predicted_stage"],
+        "method_used": method_used,
     }

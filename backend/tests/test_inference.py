@@ -11,8 +11,8 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.model_loader import artifacts, WorldModel
-from app.config import WINDOW_SIZE, N_FEATURES, STAGES, N_STAGES
-from app.inference import predict_single, forecast_rollout, explain_window, ema_smooth
+from app.config import WINDOW_SIZE, N_FEATURES, STAGES, N_STAGES, HIDDEN_SIZE, NUM_LSTM_LAYERS
+from app.inference import predict_single, forecast_rollout, explain_window, explain_window_shap, ema_smooth
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -29,9 +29,10 @@ class TestModelLoading:
     def test_model_architecture(self):
         model = artifacts.model
         assert isinstance(model, WorldModel)
-        # Check LSTM input size
+        # Check LSTM input size, hidden size, and layers
         assert model.lstm.input_size == N_FEATURES
-        assert model.lstm.hidden_size == 64
+        assert model.lstm.hidden_size == HIDDEN_SIZE
+        assert model.lstm.num_layers == NUM_LSTM_LAYERS
 
     def test_scaler_fitted(self):
         assert hasattr(artifacts.scaler, "n_features_in_")
@@ -128,6 +129,15 @@ class TestExplanation:
     def test_explain_includes_prediction(self):
         window = np.random.randn(WINDOW_SIZE, N_FEATURES).astype(np.float32)
         result = explain_window(window)
+        assert "infiltration_probability" in result
+        assert "predicted_stage" in result
+
+    def test_explain_shap(self):
+        window = np.random.randn(WINDOW_SIZE, N_FEATURES).astype(np.float32)
+        result = explain_window_shap(window, top_k=5, n_samples=20)
+        assert "attributions" in result
+        assert len(result["attributions"]) == 5
+        assert result["method_used"] in ("shap", "gradient_fallback")
         assert "infiltration_probability" in result
         assert "predicted_stage" in result
 

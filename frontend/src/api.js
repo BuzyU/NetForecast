@@ -1,10 +1,16 @@
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_KEY = import.meta.env.VITE_API_KEY || '';
 
 export async function apiFetch(endpoint, options = {}) {
   const url = `${API_URL}${endpoint}`;
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
+    ...options.headers,
+  };
   const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
     ...options,
+    headers,
   });
   if (!res.ok) {
     const detail = await res.text();
@@ -21,7 +27,10 @@ export async function apiUpload(endpoint, file) {
   const url = `${API_URL}${endpoint}`;
   const form = new FormData();
   form.append('file', file);
-  const res = await fetch(url, { method: 'POST', body: form });
+  const headers = {
+    ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
+  };
+  const res = await fetch(url, { method: 'POST', body: form, headers });
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`Upload ${res.status}: ${detail}`);

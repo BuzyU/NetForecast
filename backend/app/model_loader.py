@@ -57,6 +57,29 @@ class WorldModel(nn.Module):
         return next_state, infiltration_logit, stage_logits
 
 
+class StandardScaler:
+    """Self-contained standard scaler that does not depend on C-extensions."""
+    def __init__(self, mean=None, scale=None):
+        self.mean_ = np.asarray(mean, dtype=np.float32) if mean is not None else None
+        self.scale_ = np.asarray(scale, dtype=np.float32) if scale is not None else None
+        self.n_features_in_ = len(self.mean_) if self.mean_ is not None else N_FEATURES
+
+    def fit(self, X):
+        X = np.asarray(X, dtype=np.float32)
+        self.mean_ = np.mean(X, axis=0)
+        self.scale_ = np.std(X, axis=0)
+        self.scale_[self.scale_ == 0.0] = 1.0
+        self.n_features_in_ = X.shape[1]
+        return self
+
+    def transform(self, X):
+        X = np.asarray(X, dtype=np.float32)
+        return (X - self.mean_) / self.scale_
+
+    def fit_transform(self, X):
+        return self.fit(X).transform(X)
+
+
 class ModelArtifacts:
     """Container for all loaded artifacts. Validates shapes on load."""
 
@@ -109,7 +132,12 @@ class ModelArtifacts:
         if not SCALER_PATH.exists():
             raise FileNotFoundError(f"scaler.pkl not found at {SCALER_PATH}")
         with open(SCALER_PATH, "rb") as f:
-            self.scaler = pickle.load(f)
+            raw_scaler = pickle.load(f)
+
+        if isinstance(raw_scaler, dict):
+            self.scaler = StandardScaler(mean=raw_scaler["mean"], scale=raw_scaler["scale"])
+        else:
+            self.scaler = raw_scaler
 
         if hasattr(self.scaler, "n_features_in_"):
             if self.scaler.n_features_in_ != N_FEATURES:
@@ -125,9 +153,12 @@ class ModelArtifacts:
         if not MODEL_PATH.exists():
             raise FileNotFoundError(f"world_model.pt not found at {MODEL_PATH}")
 
+        hidden_size = self.config.get("hidden_size", HIDDEN_SIZE)
+        num_layers = self.config.get("num_layers", NUM_LSTM_LAYERS)
+        dropout = self.config.get("lstm_dropout", LSTM_DROPOUT)
         self.model = WorldModel(
-            n_features=N_FEATURES, hidden=HIDDEN_SIZE, n_stages=N_STAGES,
-            num_layers=NUM_LSTM_LAYERS, dropout=LSTM_DROPOUT,
+            n_features=N_FEATURES, hidden=hidden_size, n_stages=N_STAGES,
+            num_layers=num_layers, dropout=dropout,
         )
         state_dict = torch.load(MODEL_PATH, map_location=self.device, weights_only=True)
         self.model.load_state_dict(state_dict)
