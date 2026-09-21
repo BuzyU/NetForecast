@@ -145,18 +145,24 @@ class FlowState:
                 self._seen_seqs.add(seq)
 
     def to_features(self) -> dict:
-        duration_us = (self.last_time - self.start_time) * 1e6 if self.last_time > self.start_time else 1.0
+        duration_us = (self.last_time - self.start_time) * 1e6 if self.last_time > self.start_time else 0.0
         total_bytes = self.fwd_bytes + self.bwd_bytes
         total_pkts = self.fwd_packets + self.bwd_packets
 
+        # Prevent sub-millisecond division artifacts where tiny packet bursts
+        # calculate synthetic rates of millions of pkts/sec.
+        # Enforce minimum 10ms (0.010s) window for rate calculation.
+        effective_duration_sec = max(duration_us / 1e6, 0.01)
+        effective_duration_us = max(duration_us, 10000.0)
+
         return {
-            "flow_duration": duration_us,
+            "flow_duration": effective_duration_us,
             "tot_fwd_pkts": float(self.fwd_packets),
             "tot_bwd_pkts": float(self.bwd_packets),
             "fwd_pkt_len_mean": float(np.mean(self.fwd_pkt_lengths)) if self.fwd_pkt_lengths else 0.0,
             "bwd_pkt_len_mean": float(np.mean(self.bwd_pkt_lengths)) if self.bwd_pkt_lengths else 0.0,
-            "flow_bytes_s": total_bytes / (duration_us / 1e6) if duration_us > 0 else 0.0,
-            "flow_pkts_s": total_pkts / (duration_us / 1e6) if duration_us > 0 else 0.0,
+            "flow_bytes_s": float(total_bytes / effective_duration_sec),
+            "flow_pkts_s": float(total_pkts / effective_duration_sec),
             "flow_iat_mean": float(np.mean(self.flow_iats)) if self.flow_iats else 0.0,
             "flow_iat_std": float(np.std(self.flow_iats)) if len(self.flow_iats) > 1 else 0.0,
             "fwd_iat_mean": float(np.mean(self.fwd_iats)) if self.fwd_iats else 0.0,
@@ -167,8 +173,8 @@ class FlowState:
             "rst_flag_cnt": float(self.rst_count),
             "psh_flag_cnt": float(self.psh_count),
             "urg_flag_cnt": float(self.urg_count),
-            "down_up_ratio": self.bwd_bytes / max(self.fwd_bytes, 1),
-            "pkt_size_avg": total_bytes / max(total_pkts, 1),
+            "down_up_ratio": float(self.bwd_bytes / max(self.fwd_bytes, 1)),
+            "pkt_size_avg": float(total_bytes / max(total_pkts, 1)),
             "ttl_variance": float(np.var(self.ttl_values)) if len(self.ttl_values) > 1 else 0.0,
             "tcp_win_size": float(np.mean(self.tcp_win_sizes)) if self.tcp_win_sizes else 0.0,
             "retransmit_cnt": float(self.retransmit_count),
