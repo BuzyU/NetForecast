@@ -53,13 +53,29 @@ async def lifespan(app: FastAPI):
     await init_db()
     await _migrate_db()
 
+    # Automatically archive any past session data and start fresh cycle on startup
+    from .database import async_session
+    from .routes.system import archive_and_reset_cycle
+    try:
+        async with async_session() as db:
+            res = await archive_and_reset_cycle(db, reason="startup")
+            logger.info("Fresh cycle initialized on startup: %s (archived %d flows, %d sessions)",
+                        res.get("new_cycle_id"), res.get("archived_flows", 0), res.get("archived_sessions", 0))
+    except Exception as e:
+        logger.warning("Startup cycle archival skipped: %s", e)
+
     logger.info("=" * 60)
     logger.info("Service ready — all systems operational")
     logger.info("=" * 60)
 
     yield
 
-    logger.info("Shutting down...")
+    logger.info("Shutting down... archiving active cycle to disk...")
+    try:
+        async with async_session() as db:
+            await archive_and_reset_cycle(db, reason="shutdown")
+    except Exception as e:
+        logger.warning("Shutdown cycle archival skipped: %s", e)
 
 
 async def _migrate_db():
@@ -67,9 +83,23 @@ async def _migrate_db():
     from .database import engine
     new_columns = [
         ("flow_records", "source", "VARCHAR(32) DEFAULT 'api'"),
+        ("flow_records", "src_port", "INTEGER"),
+        ("flow_records", "dst_port", "INTEGER"),
+        ("flow_records", "protocol", "VARCHAR(16) DEFAULT 'TCP'"),
+        ("flow_records", "process_name", "VARCHAR(64)"),
+        ("flow_records", "app_name", "VARCHAR(64)"),
+        ("flow_records", "direction", "VARCHAR(16)"),
+        ("flow_records", "src_identity", "VARCHAR(32)"),
+        ("flow_records", "dst_identity", "VARCHAR(32)"),
         ("sessions", "source", "VARCHAR(32) DEFAULT 'api'"),
         ("sessions", "direction", "VARCHAR(16) DEFAULT 'unknown'"),
         ("sessions", "max_stage_reached", "VARCHAR(32) DEFAULT 'Benign'"),
+        ("sessions", "process_name", "VARCHAR(64)"),
+        ("sessions", "app_name", "VARCHAR(64)"),
+        ("sessions", "tot_fwd_pkts", "FLOAT DEFAULT 0.0"),
+        ("sessions", "tot_bwd_pkts", "FLOAT DEFAULT 0.0"),
+        ("sessions", "src_identity", "VARCHAR(32)"),
+        ("sessions", "dst_identity", "VARCHAR(32)"),
     ]
     import sqlalchemy
     async with engine.begin() as conn:

@@ -193,3 +193,247 @@ async def purge_simulated_data(db: AsyncSession = Depends(get_db)):
         "deleted_sessions": deleted_sessions,
         "deleted_alerts": deleted_alerts,
     }
+
+
+# ═══════════════════════════════════════════════════════════════
+# CYCLE MANAGEMENT & WELLBEING ARCHIVAL
+# ═══════════════════════════════════════════════════════════════
+from datetime import datetime, timezone
+import json
+from pathlib import Path
+from ..config import DB_DIR, FLOW_FEATURES
+from ..network_identity import get_host_identity
+
+ARCHIVE_DIR = DB_DIR / "archives"
+ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+class CycleState:
+    cycle_id: str = datetime.now(timezone.utc).strftime("cycle_%Y%m%d_%H%M%S")
+    started_at: datetime = datetime.now(timezone.utc)
+
+
+def _compute_wellbeing_score(total_flows: int, alerts: list, max_stage: str) -> float:
+    """
+    Calculate an interpretable Network Wellbeing Score (0 to 100%).
+    100 = completely pristine, healthy baseline.
+    Deductions applied for attacks, anomalies, and active compromise stages.
+    """
+    if total_flows == 0:
+        return 100.0
+
+    score = 100.0
+
+    # Severity penalties
+    for a in alerts:
+        sev = (a.get("severity") or "").lower()
+        if sev == "critical":
+            score -= 15.0
+        elif sev == "high":
+            score -= 8.0
+        elif sev == "medium":
+            score -= 4.0
+        elif sev == "low":
+            score -= 1.0
+
+    # Stage penalty
+    stage_penalties = {
+        "Exfiltration": 35.0,
+        "C2": 25.0,
+        "Lateral Movement": 15.0,
+        "Initial Access": 10.0,
+        "Reconnaissance": 5.0,
+        "Benign": 0.0,
+    }
+    score -= stage_penalties.get(max_stage, 0.0)
+
+    return round(max(0.0, min(100.0, score)), 1)
+
+
+async def archive_and_reset_cycle(db: AsyncSession, reason: str = "manual") -> dict:
+    """
+    Archive all active flows, sessions, and alerts into a timestamped JSON file,
+    then clear active tables and reset in-memory buffers for a fresh cycle.
+    """
+    from sqlalchemy import select, func
+    from ..ingestion import _session_buffers
+
+    now = datetime.now(timezone.utc)
+    archive_id = CycleState.cycle_id
+
+    # 1. Fetch current sessions
+    sess_res = await db.execute(select(SessionDB))
+    sessions = sess_res.scalars().all()
+
+    # 2. Fetch current alerts
+    alert_res = await db.execute(select(AlertDB))
+    alerts = alert_res.scalars().all()
+
+    # 3. Flow count & max stage
+    flow_cnt_res = await db.execute(select(func.count(FlowRecordDB.id)))
+    total_flows = flow_cnt_res.scalar() or 0
+
+    max_stage = "Benign"
+    app_flow_counts = {}
+    for s in sessions:
+        if s.max_stage_reached and s.max_stage_reached != "Benign":
+            max_stage = s.max_stage_reached
+        app = s.app_name or s.process_name or "Unknown"
+        app_flow_counts[app] = app_flow_counts.get(app, 0) + (s.flow_count or 1)
+
+    alerts_data = [
+        {
+            "id": a.id,
+            "session_key": a.session_key,
+            "severity": a.severity,
+            "infiltration_prob": a.infiltration_prob,
+            "predicted_stage": a.predicted_stage,
+            "recommended_action": a.recommended_action,
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+            "acknowledged": a.acknowledged,
+        }
+        for a in alerts
+    ]
+
+    sessions_data = [
+        {
+            "session_key": s.session_key,
+            "src_ip": s.src_ip,
+            "dst_ip": s.dst_ip,
+            "flow_count": s.flow_count,
+            "latest_risk_score": s.latest_risk_score,
+            "latest_stage": s.latest_stage,
+            "max_stage_reached": s.max_stage_reached,
+            "direction": s.direction,
+            "process_name": getattr(s, "process_name", None),
+            "app_name": getattr(s, "app_name", None),
+            "tot_fwd_pkts": getattr(s, "tot_fwd_pkts", 0),
+            "tot_bwd_pkts": getattr(s, "tot_bwd_pkts", 0),
+            "source": s.source,
+            "first_seen": s.first_seen.isoformat() if s.first_seen else None,
+            "last_seen": s.last_seen.isoformat() if s.last_seen else None,
+        }
+        for s in sessions
+    ]
+
+    wellbeing = _compute_wellbeing_score(total_flows, alerts_data, max_stage)
+
+    archive_doc = {
+        "cycle_id": archive_id,
+        "started_at": CycleState.started_at.isoformat(),
+        "archived_at": now.isoformat(),
+        "reason": reason,
+        "stats": {
+            "total_flows": total_flows,
+            "total_sessions": len(sessions_data),
+            "total_alerts": len(alerts_data),
+            "max_stage": max_stage,
+            "wellbeing_score": wellbeing,
+            "top_apps": [
+                {"name": k, "flows": v}
+                for k, v in sorted(app_flow_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+            ],
+        },
+        "sessions": sessions_data,
+        "alerts": alerts_data,
+    }
+
+    # Write archive only if there was actual data or on explicit manual reset
+    if total_flows > 0 or len(sessions_data) > 0 or reason == "manual":
+        archive_file = ARCHIVE_DIR / f"{archive_id}.json"
+        try:
+            with open(archive_file, "w", encoding="utf-8") as f:
+                json.dump(archive_doc, f, indent=2)
+            logger.info("Archived cycle %s to %s (%d flows, %d sessions)",
+                        archive_id, archive_file.name, total_flows, len(sessions_data))
+        except Exception as e:
+            logger.error("Failed to write cycle archive: %s", e)
+
+    # Reset active tables
+    await db.execute(delete(FlowRecordDB))
+    await db.execute(delete(SessionDB))
+    await db.execute(delete(AlertDB))
+    await db.commit()
+
+    # Clear in-memory buffers
+    _session_buffers.clear()
+
+    # Start new cycle
+    new_cycle_id = now.strftime("cycle_%Y%m%d_%H%M%S")
+    CycleState.cycle_id = new_cycle_id
+    CycleState.started_at = now
+
+    logger.info("Initialized fresh cycle: %s", new_cycle_id)
+    return {
+        "status": "cycle_reset",
+        "previous_cycle_id": archive_id,
+        "new_cycle_id": new_cycle_id,
+        "started_at": now.isoformat(),
+        "archived_flows": total_flows,
+        "archived_sessions": len(sessions_data),
+        "wellbeing_score": wellbeing,
+    }
+
+
+@router.post("/cycle/start")
+async def start_new_cycle(db: AsyncSession = Depends(get_db)):
+    """
+    Manually start a fresh monitoring cycle.
+    Archives previous cycle data and clears the active flow dashboard.
+    """
+    return await archive_and_reset_cycle(db, reason="manual")
+
+
+@router.get("/cycle/current")
+async def get_current_cycle():
+    """Get active cycle metadata."""
+    return {
+        "cycle_id": CycleState.cycle_id,
+        "started_at": CycleState.started_at.isoformat(),
+        "elapsed_seconds": (datetime.now(timezone.utc) - CycleState.started_at).total_seconds(),
+    }
+
+
+@router.get("/cycles")
+async def list_archived_cycles():
+    """List all archived cycles with health and wellbeing metrics."""
+    cycles = []
+    if not ARCHIVE_DIR.exists():
+        return []
+
+    for file_path in sorted(ARCHIVE_DIR.glob("cycle_*.json"), reverse=True):
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                doc = json.load(f)
+                cycles.append({
+                    "cycle_id": doc.get("cycle_id", file_path.stem),
+                    "started_at": doc.get("started_at"),
+                    "archived_at": doc.get("archived_at"),
+                    "reason": doc.get("reason", "unknown"),
+                    "stats": doc.get("stats", {}),
+                })
+        except Exception as e:
+            logger.warning("Error reading archive %s: %s", file_path.name, e)
+
+    return cycles
+
+
+@router.get("/cycles/{cycle_id}")
+async def get_archived_cycle_detail(cycle_id: str):
+    """Retrieve full session and alert contents of a past cycle."""
+    file_path = ARCHIVE_DIR / f"{cycle_id}.json"
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"Cycle archive '{cycle_id}' not found")
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading cycle: {e}")
+
+
+@router.get("/host-identity")
+async def get_host_network_identity():
+    """Retrieve local machine hostname, active adapters, and local IPs."""
+    return get_host_identity()
+

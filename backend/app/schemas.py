@@ -47,6 +47,14 @@ class FlowRecord(BaseModel):
     # Optional metadata for session grouping + data provenance
     src_ip: Optional[str] = None
     dst_ip: Optional[str] = None
+    src_port: Optional[int] = None
+    dst_port: Optional[int] = None
+    protocol: Optional[str] = "TCP"
+    process_name: Optional[str] = None
+    app_name: Optional[str] = None
+    direction: Optional[str] = None
+    src_identity: Optional[str] = None
+    dst_identity: Optional[str] = None
     timestamp: Optional[datetime] = None
     # §7: tag the origin of this flow so the UI can show a SIMULATION banner
     source: Optional[str] = Field(

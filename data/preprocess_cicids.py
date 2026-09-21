@@ -17,12 +17,13 @@ The output CSV is ready for:
 import os
 import sys
 import argparse
+from typing import Optional
 import pandas as pd
 import numpy as np
 from pathlib import Path
 
 # ── Label mapping: CIC-IDS2017 → 6-stage MITRE taxonomy ──────
-def map_label(raw_label: str) -> str:
+def map_label(raw_label: str) -> Optional[str]:
     """Robust substring-based mapping immune to encoding differences and dash types."""
     if not isinstance(raw_label, str):
         return None
@@ -82,7 +83,7 @@ def normalize_columns(df):
     return df
 
 
-def process_single_csv(filepath: Path, sample_limit: int = None, file_idx: int = 0):
+def process_single_csv(filepath: Path, sample_limit: Optional[int] = None, file_idx: int = 0):
     """Process one CIC-IDS2017 CSV file with memory efficiency and stratified sampling."""
     print(f"  Processing [{file_idx}]: {filepath.name}...")
 
@@ -213,7 +214,7 @@ def process_single_csv(filepath: Path, sample_limit: int = None, file_idx: int =
 
     # Map to integer session IDs within file
     session_map = {k: i for i, k in enumerate(result["session_id"].unique())}
-    result["session_id"] = result["session_id"].map(session_map)
+    result["session_id"] = result["session_id"].map(session_map.get)
 
     # ── Clean infinities and NaN ──────────────────────────────
     result = result.replace([np.inf, -np.inf], np.nan)
@@ -262,7 +263,7 @@ def main():
 
     # Re-index unique integer session IDs across all files
     session_map = {k: i for i, k in enumerate(combined["session_id"].unique())}
-    combined["session_id"] = combined["session_id"].map(session_map)
+    combined["session_id"] = combined["session_id"].map(session_map.get)
 
     # Sort by session + time
     combined = combined.sort_values(["session_id", "timestamp"]).reset_index(drop=True)

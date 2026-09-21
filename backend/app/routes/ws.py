@@ -79,6 +79,12 @@ async def get_sessions(
             "latest_stage": s.latest_stage,
             "max_stage_reached": s.max_stage_reached,
             "direction": s.direction,
+            "process_name": s.process_name,
+            "app_name": s.app_name,
+            "tot_fwd_pkts": s.tot_fwd_pkts or 0,
+            "tot_bwd_pkts": s.tot_bwd_pkts or 0,
+            "src_identity": s.src_identity,
+            "dst_identity": s.dst_identity,
             "source": s.source,
             "first_seen": s.first_seen.isoformat() if s.first_seen else None,
             "last_seen": s.last_seen.isoformat() if s.last_seen else None,
@@ -108,6 +114,14 @@ async def get_session_flows(
         {
             "id": f.id,
             "timestamp": f.timestamp.isoformat() if f.timestamp else None,
+            "src_port": f.src_port,
+            "dst_port": f.dst_port,
+            "protocol": f.protocol or "TCP",
+            "process_name": f.process_name,
+            "app_name": f.app_name,
+            "direction": f.direction,
+            "src_identity": f.src_identity,
+            "dst_identity": f.dst_identity,
             "features": {feat: getattr(f, feat) for feat in FLOW_FEATURES},
             "infiltration_prob": f.infiltration_prob,
             "predicted_stage": f.predicted_stage,
@@ -129,10 +143,12 @@ async def dashboard_stats(db: AsyncSession = Depends(get_db)):
     )
 
     # Check if any simulated data is present (§7 — data-provenance labeling)
+    # BUG FIX: Only flag simulated data active if system is actually in simulated mode
+    from .system import SystemState
     sim_count = await db.execute(
         select(func.count(SessionDB.id)).where(SessionDB.source == "simulated")
     )
-    has_simulated = (sim_count.scalar() or 0) > 0
+    has_simulated = (SystemState.mode == "simulated") and ((sim_count.scalar() or 0) > 0)
 
     # Direction breakdown
     inbound_count = await db.execute(

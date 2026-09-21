@@ -44,6 +44,16 @@ class FlowRecordDB(Base):
     # Data provenance tag (§7 — simulation vs live vs upload)
     source = Column(String(32), nullable=True, default="api")
 
+    # Network endpoint & process metadata
+    src_port = Column(Integer, nullable=True)
+    dst_port = Column(Integer, nullable=True)
+    protocol = Column(String(16), nullable=True, default="TCP")
+    process_name = Column(String(64), nullable=True)
+    app_name = Column(String(64), nullable=True)
+    direction = Column(String(16), nullable=True)
+    src_identity = Column(String(32), nullable=True)
+    dst_identity = Column(String(32), nullable=True)
+
     # All 22 features (stored raw, pre-scaling)
     flow_duration = Column(Float)
     tot_fwd_pkts = Column(Float)
@@ -89,6 +99,14 @@ class SessionDB(Base):
 
     # Traffic direction classification (§11A, §12 — RFC1918 based)
     direction = Column(String(16), default="unknown")  # "inbound"|"outbound"|"internal"|"unknown"
+
+    # Application and host identity
+    process_name = Column(String(64), nullable=True)
+    app_name = Column(String(64), nullable=True)
+    tot_fwd_pkts = Column(Float, default=0.0)
+    tot_bwd_pkts = Column(Float, default=0.0)
+    src_identity = Column(String(32), nullable=True)
+    dst_identity = Column(String(32), nullable=True)
 
     # Data provenance (§7)
     source = Column(String(32), nullable=True, default="api")

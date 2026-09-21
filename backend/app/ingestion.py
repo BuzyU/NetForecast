@@ -33,6 +33,8 @@ from .database import AlertDB, FlowRecordDB, SessionDB
 from .inference import predict_single
 from .live import broadcast  # BUG-01 fix
 from .model_loader import artifacts
+from .network_identity import classify_ip_identity
+from .process_resolver import resolve_process
 from .schemas import FlowRecord
 
 logger = logging.getLogger(__name__)
@@ -183,13 +185,43 @@ async def ingest_single_flow(
 
     session_key = derive_session_key(flow.src_ip, flow.dst_ip, flow.timestamp)
     source = getattr(flow, "source", None) or "api"
-    direction = classify_direction(flow.src_ip, flow.dst_ip)
+
+    # ── Host vs Peer Identity & Direction Resolution ──────────────
+    src_identity = classify_ip_identity(flow.src_ip)
+    dst_identity = classify_ip_identity(flow.dst_ip)
+
+    if src_identity == "HOST" and dst_identity != "HOST":
+        direction = "outbound"
+        port_for_proc = getattr(flow, "src_port", None)
+    elif dst_identity == "HOST" and src_identity != "HOST":
+        direction = "inbound"
+        port_for_proc = getattr(flow, "dst_port", None)
+    elif src_identity == "HOST" and dst_identity == "HOST":
+        direction = "internal"
+        port_for_proc = getattr(flow, "src_port", None) or getattr(flow, "dst_port", None)
+    else:
+        direction = classify_direction(flow.src_ip, flow.dst_ip)
+        port_for_proc = getattr(flow, "src_port", None) or getattr(flow, "dst_port", None)
+
+    # ── Process & Application Resolution ──────────────────────────
+    proc_info = resolve_process(port_for_proc, getattr(flow, "protocol", "TCP"))
+    process_name = getattr(flow, "process_name", None) or proc_info.get("process_name")
+    app_name = getattr(flow, "app_name", None) or proc_info.get("app_name")
+    app_icon = proc_info.get("app_icon", "network")
 
     # ── Store raw record ──────────────────────────────────────────
     db_record = FlowRecordDB(
         session_key=session_key,
         src_ip=flow.src_ip,
         dst_ip=flow.dst_ip,
+        src_port=getattr(flow, "src_port", None),
+        dst_port=getattr(flow, "dst_port", None),
+        protocol=getattr(flow, "protocol", "TCP") or "TCP",
+        process_name=process_name,
+        app_name=app_name,
+        direction=direction,
+        src_identity=src_identity,
+        dst_identity=dst_identity,
         timestamp=flow.timestamp or datetime.now(timezone.utc),
         source=source,
         **{f: getattr(flow, f) for f in FLOW_FEATURES},
@@ -203,6 +235,9 @@ async def ingest_single_flow(
     session = result.scalar_one_or_none()
     now = datetime.now(timezone.utc)
 
+    fwd_pkts = float(getattr(flow, "tot_fwd_pkts", 0) or 0)
+    bwd_pkts = float(getattr(flow, "tot_bwd_pkts", 0) or 0)
+
     if session is None:
         session = SessionDB(
             session_key=session_key,
@@ -213,15 +248,30 @@ async def ingest_single_flow(
             last_seen=now,
             source=source,
             direction=direction,
+            process_name=process_name,
+            app_name=app_name,
+            tot_fwd_pkts=fwd_pkts,
+            tot_bwd_pkts=bwd_pkts,
+            src_identity=src_identity,
+            dst_identity=dst_identity,
             max_stage_reached="Benign",
         )
         db.add(session)
     else:
         session.flow_count += 1
         session.last_seen = now
-        # Update direction if we can resolve it (first flows may lack IPs)
+        session.tot_fwd_pkts = (session.tot_fwd_pkts or 0.0) + fwd_pkts
+        session.tot_bwd_pkts = (session.tot_bwd_pkts or 0.0) + bwd_pkts
+        if process_name and not session.process_name:
+            session.process_name = process_name
+        if app_name and not session.app_name:
+            session.app_name = app_name
         if session.direction == "unknown" and direction != "unknown":
             session.direction = direction
+        if not session.src_identity and src_identity:
+            session.src_identity = src_identity
+        if not session.dst_identity and dst_identity:
+            session.dst_identity = dst_identity
 
     # ── Scale and buffer ──────────────────────────────────────────
     scaled = artifacts.scale_features(raw_features)[0]
@@ -320,8 +370,20 @@ async def ingest_single_flow(
             "session_key": session_key,
             "src_ip": flow.src_ip,
             "dst_ip": flow.dst_ip,
+            "src_port": getattr(flow, "src_port", None),
+            "dst_port": getattr(flow, "dst_port", None),
+            "protocol": getattr(flow, "protocol", "TCP") or "TCP",
             "direction": direction,
             "source": source,
+            "process_name": process_name,
+            "app_name": app_name,
+            "app_icon": app_icon,
+            "src_identity": src_identity,
+            "dst_identity": dst_identity,
+            "tot_fwd_pkts": fwd_pkts,
+            "tot_bwd_pkts": bwd_pkts,
+            "flow_bytes_s": getattr(flow, "flow_bytes_s", 0.0),
+            "flow_pkts_s": getattr(flow, "flow_pkts_s", 0.0),
             "flow_count": session.flow_count,
             "infiltration_prob": (
                 result_data["prediction"]["infiltration_probability"]

@@ -13,8 +13,10 @@ import requests
 
 if sys.platform == "win32":
     try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        if hasattr(sys.stdout, "reconfigure"):
+            getattr(sys.stdout, "reconfigure")(encoding="utf-8", errors="replace")
+        if hasattr(sys.stderr, "reconfigure"):
+            getattr(sys.stderr, "reconfigure")(encoding="utf-8", errors="replace")
     except Exception:
         pass
 
@@ -26,14 +28,18 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 try:
-    from scapy.all import (
-        sniff, rdpcap, IP, TCP, UDP, Raw,
-        get_if_list, conf,
-    )
+    from scapy.all import sniff, rdpcap, Raw, get_if_list, conf
+    from scapy.layers.inet import IP, TCP, UDP
 except ImportError:
-    print("ERROR: scapy not installed. Run: pip install scapy")
-    print("On Windows, also install Npcap: https://npcap.com/#download")
-    sys.exit(1)
+    try:
+        from scapy.all import (  # type: ignore
+            sniff, rdpcap, IP, TCP, UDP, Raw,
+            get_if_list, conf,
+        )
+    except ImportError:
+        print("ERROR: scapy not installed. Run: pip install scapy")
+        print("On Windows, also install Npcap: https://npcap.com/#download")
+        sys.exit(1)
 
 
 @dataclass
@@ -275,6 +281,10 @@ class FlowExtractor:
         features = flow.to_features()
         features["src_ip"] = flow.src_ip
         features["dst_ip"] = flow.dst_ip
+        features["src_port"] = flow.src_port
+        features["dst_port"] = flow.dst_port
+        proto_map = {6: "TCP", 17: "UDP", 1: "ICMP"}
+        features["protocol"] = proto_map.get(flow.protocol, str(flow.protocol))
         features["timestamp"] = datetime.now(timezone.utc).isoformat()
         features["source"] = "live_capture"  # §7 provenance tag
 
@@ -349,25 +359,27 @@ def get_network_interfaces():
         pass
 
     try:
-        for k, iface in conf.ifaces.items():
-            name = getattr(iface, "name", str(k))
-            desc = getattr(iface, "description", "")
-            ip = getattr(iface, "ip", "")
-            ip_str = str(ip) if ip else ""
+        ifaces_dict = getattr(conf, "ifaces", None)
+        if ifaces_dict and hasattr(ifaces_dict, "items"):
+            for k, iface in ifaces_dict.items():
+                name = getattr(iface, "name", str(k))
+                desc = getattr(iface, "description", "")
+                ip = getattr(iface, "ip", "")
+                ip_str = str(ip) if ip else ""
 
-            if ip_str.startswith("127.") or "loopback" in name.lower() or "loopback" in desc.lower():
-                continue
+                if ip_str.startswith("127.") or "loopback" in name.lower() or "loopback" in desc.lower():
+                    continue
 
-            is_active = (ip_str == active_ip) if active_ip else (bool(ip_str) and not ip_str.startswith("169.254."))
+                is_active = (ip_str == active_ip) if active_ip else (bool(ip_str) and not ip_str.startswith("169.254."))
 
-            interfaces.append({
-                "name": name,
-                "description": desc,
-                "ip": ip_str,
-                "is_active": is_active,
-                "scapy_key": k,
-                "iface": iface,
-            })
+                interfaces.append({
+                    "name": name,
+                    "description": desc,
+                    "ip": ip_str,
+                    "is_active": is_active,
+                    "scapy_key": k,
+                    "iface": iface,
+                })
     except Exception:
         pass
 

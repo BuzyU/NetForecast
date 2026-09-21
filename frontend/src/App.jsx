@@ -8,7 +8,8 @@ import {
   Eye, ChevronRight, Check, MonitorDot, Database,
   Zap, Settings, BarChart3, Terminal,
   Wifi, ArrowDownToLine, ArrowUpFromLine,
-  Network, FlaskConical,
+  Network, FlaskConical, Globe, Cpu, Laptop,
+  RotateCcw, HeartPulse, X,
 } from 'lucide-react';
 import { apiFetch, apiPost, apiUpload, createWebSocket } from './api';
 import {
@@ -34,23 +35,91 @@ const SOURCE_LABELS = {
   api: { label: 'API INGEST', color: 'var(--text-secondary)', icon: Zap },
 };
 
-// Direction badge
+// Direction badge (IN / OUT / INT)
 function DirBadge({ dir }) {
   const cfg = {
     inbound:  { label: 'IN',  color: '#c0392b', icon: ArrowDownToLine },
     outbound: { label: 'OUT', color: '#e67e22', icon: ArrowUpFromLine },
-    internal: { label: 'INT', color: 'var(--text-muted)', icon: Network },
+    internal: { label: 'INT', color: '#16a085', icon: Network },
     unknown:  { label: '?',   color: 'var(--text-muted)', icon: Network },
   }[dir] || { label: '?', color: 'var(--text-muted)', icon: Network };
   const Icon = cfg.icon;
   return (
     <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 2,
-      fontSize: '0.6rem', color: cfg.color, fontWeight: 600,
-      letterSpacing: '0.05em',
+      display: 'inline-flex', alignItems: 'center', gap: 3,
+      fontSize: '0.62rem', color: cfg.color, fontWeight: 700,
+      letterSpacing: '0.04em',
+      fontFamily: 'var(--font-mono)',
     }}>
-      <Icon size={9}/> {cfg.label}
+      <Icon size={10}/> {cfg.label}
     </span>
+  );
+}
+
+// Host vs Peer Identity badge
+function IdentityBadge({ identity }) {
+  if (!identity || identity === 'UNKNOWN') return null;
+  const cfg = {
+    HOST: { label: 'HOST', class: 'id-host', title: 'Local Laptop' },
+    LAN_PEER: { label: 'LAN', class: 'id-lan', title: 'Local Network Device' },
+    NAT_PEER: { label: 'NAT', class: 'id-nat', title: 'External / NAT Masked Peer' },
+  }[identity] || { label: identity, class: 'id-lan', title: 'Peer Device' };
+
+  return <span className={`id-badge ${cfg.class}`} title={cfg.title}>{cfg.label}</span>;
+}
+
+// Application & Process badge with icon
+function AppBadge({ appName, processName, iconType }) {
+  const name = appName || processName || 'General Net';
+  const nameLower = name.toLowerCase();
+  let badgeClass = 'app-generic';
+  let Icon = Network;
+  let color = 'var(--text-secondary)';
+
+  if (nameLower.includes('antigravity') || nameLower.includes('code')) {
+    badgeClass = 'app-antigravity';
+    Icon = Terminal;
+    color = '#8e44ad';
+  } else if (nameLower.includes('chrome') || nameLower.includes('edge') || nameLower.includes('brave') || nameLower.includes('firefox')) {
+    badgeClass = 'app-chrome';
+    Icon = Globe;
+    color = '#2980b9';
+  } else if (nameLower.includes('python') || nameLower.includes('uvicorn')) {
+    badgeClass = 'app-python';
+    Icon = Cpu;
+    color = '#27ae60';
+  } else if (nameLower.includes('system') || nameLower.includes('kernel') || nameLower.includes('svchost')) {
+    badgeClass = 'app-system';
+    Icon = Shield;
+    color = 'var(--text-secondary)';
+  } else if (nameLower.includes('node') || nameLower.includes('vite')) {
+    badgeClass = 'app-node';
+    Icon = Zap;
+    color = 'var(--gold)';
+  } else if (nameLower.includes('ping') || iconType === 'activity') {
+    Icon = Activity;
+    color = '#ec4899';
+  }
+
+  return (
+    <span className={`app-badge ${badgeClass}`} title={`Process: ${processName || name}`}>
+      <Icon size={11} color={color}/>
+      <span>{name}</span>
+    </span>
+  );
+}
+
+// Packet and Bandwidth breakdown
+function PacketStat({ fwdPkts, bwdPkts, bytesPerSec, proto }) {
+  const tx = Math.round(fwdPkts || 0);
+  const rx = Math.round(bwdPkts || 0);
+  return (
+    <div className="packet-stat">
+      <span className="packet-stat-primary">TX: {tx} • RX: {rx}</span>
+      <span className="packet-stat-sub">
+        {proto || 'IP'}{bytesPerSec ? ` • ${(bytesPerSec / 1024).toFixed(1)} KB/s` : ''}
+      </span>
+    </div>
   );
 }
 
@@ -87,6 +156,75 @@ function CompromiseIndicator({ stage, riskScore }) {
   );
 }
 
+// Network Wellbeing & Audit History Modal
+function WellbeingModal({ isOpen, onClose }) {
+  const [cycles, setCycles] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setLoading(true);
+    apiFetch('/system/cycles')
+      .then(c => { setCycles(c); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="wellbeing-modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+            <HeartPulse size={16} color="var(--severity-low)"/>
+            <span className="panel-title">NETWORK_WELLBEING & AUDIT SNAPSHOTS</span>
+          </div>
+          <button className="btn btn-sm" onClick={onClose}><X size={13}/></button>
+        </div>
+        <div className="modal-body">
+          {loading ? (
+            <div className="empty-state"><div className="loading-spinner"/><p>Loading archived cycles...</p></div>
+          ) : cycles.length === 0 ? (
+            <div className="empty-state"><p>No archived cycles yet. Click NEW_CYCLE to create an audit snapshot.</p></div>
+          ) : (
+            cycles.map(c => {
+              const score = c.stats?.wellbeing_score ?? 100;
+              const scoreColor = score >= 90 ? 'var(--severity-low)' : score >= 70 ? 'var(--severity-high)' : 'var(--severity-critical)';
+              return (
+                <div key={c.cycle_id} className="cycle-card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span className="mono text-sm" style={{ fontWeight: 700 }}>{c.cycle_id}</span>
+                    <span className="mono" style={{ fontSize: '0.85rem', fontWeight: 800, color: scoreColor }}>
+                      {score}% WELLBEING
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 'var(--sp-4)', fontSize: '0.67rem', color: 'var(--text-secondary)' }} className="mono">
+                    <span>Flows: {c.stats?.total_flows || 0}</span>
+                    <span>Sessions: {c.stats?.total_sessions || 0}</span>
+                    <span>Alerts: {c.stats?.total_alerts || 0}</span>
+                    <span>Max Stage: <strong style={{ color: stageColor(c.stats?.max_stage || 'Benign') }}>{c.stats?.max_stage || 'Benign'}</strong></span>
+                    <span>Archived: {formatTime(c.archived_at)}</span>
+                  </div>
+                  {c.stats?.top_apps && c.stats.top_apps.length > 0 && (
+                    <div style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center', marginTop: 4 }}>
+                      <span className="mono text-muted text-xs">TOP APPS:</span>
+                      {c.stats.top_apps.map((a, i) => (
+                        <span key={i} className="app-badge app-generic" style={{ fontSize: '0.58rem' }}>
+                          {a.name} ({a.flows})
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════
 // APP SHELL
 // ═══════════════════════════════════════════════════════════════
@@ -101,10 +239,48 @@ export default function App() {
   const [systemMode, setSystemMode] = useState('live');
   const [simulatorRunning, setSimulatorRunning] = useState(false);
 
+  // Live flows and cycle management (persists across navigation)
+  const [liveFlows, setLiveFlows] = useState([]);
+  const [wsConnected, setWsConnected] = useState(false);
+  const [hostIdentity, setHostIdentity] = useState(null);
+  const [currentCycle, setCurrentCycle] = useState(null);
+  const [wellbeingOpen, setWellbeingOpen] = useState(false);
+
   // Live clock
   useEffect(() => {
     const t = setInterval(() => setClock(new Date()), 1000);
     return () => clearInterval(t);
+  }, []);
+
+  // Root WebSocket for persistent live flow stream
+  useEffect(() => {
+    const ws = createWebSocket();
+    ws.onopen = () => setWsConnected(true);
+    ws.onclose = () => setWsConnected(false);
+    ws.onerror = () => setWsConnected(false);
+
+    ws.onmessage = (evt) => {
+      try {
+        const data = JSON.parse(evt.data);
+        if (data.type === 'pong') return;
+        setLiveFlows(prev => {
+          const next = [{ ...data, _ts: new Date().toISOString() }, ...prev];
+          return next.length > 500 ? next.slice(0, 500) : next;
+        });
+        if (data.alert) {
+          setAlertCount(c => c + 1);
+        }
+      } catch { /* ignore non-JSON */ }
+    };
+
+    const pingIv = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) ws.send('ping');
+    }, 15000);
+
+    return () => {
+      clearInterval(pingIv);
+      ws.close();
+    };
   }, []);
 
   const fetchSystemMode = useCallback(() => {
@@ -116,7 +292,12 @@ export default function App() {
       .catch(() => {});
   }, []);
 
-  // Health + alert polling + system mode
+  const fetchHostAndCycle = useCallback(() => {
+    apiFetch('/system/host-identity').then(setHostIdentity).catch(() => {});
+    apiFetch('/system/cycle/current').then(setCurrentCycle).catch(() => {});
+  }, []);
+
+  // Health + alert polling + system mode + host/cycle
   useEffect(() => {
     const updateHealth = (h) => {
       setHealth(h);
@@ -134,14 +315,30 @@ export default function App() {
     apiFetch('/health').then(updateHealth).catch(() => setHealth({ status: 'offline' }));
     apiFetch('/alerts/stats').then(s => setAlertCount(s.unacknowledged || 0)).catch(() => {});
     fetchSystemMode();
+    fetchHostAndCycle();
 
     const iv = setInterval(() => {
       apiFetch('/health').then(updateHealth).catch(() => setHealth({ status: 'offline' }));
       apiFetch('/alerts/stats').then(s => setAlertCount(s.unacknowledged || 0)).catch(() => {});
       fetchSystemMode();
+      fetchHostAndCycle();
     }, 5000);
     return () => clearInterval(iv);
-  }, [fetchSystemMode]);
+  }, [fetchSystemMode, fetchHostAndCycle]);
+
+  const handleStartNewCycle = async () => {
+    if (!window.confirm('Start a fresh cycle? Active sessions and flows will be safely archived to disk.')) {
+      return;
+    }
+    try {
+      const res = await apiPost('/system/cycle/start', {});
+      setLiveFlows([]);
+      fetchHostAndCycle();
+      alert(`Archived ${res.archived_flows} flows (${res.archived_sessions} sessions). Fresh cycle started!`);
+    } catch (e) {
+      alert(e.message || 'Failed to start new cycle');
+    }
+  };
 
   const handleToggleMode = async (newMode) => {
     try {
@@ -265,6 +462,40 @@ export default function App() {
           SYS_VIEW // <span className="view-name">[{viewLabels[view] || view.toUpperCase()}]</span>
         </span>
         <div className="header-right">
+          {/* Host identity */}
+          {hostIdentity && (
+            <div className="host-badge-chip" title={`Adapters: ${hostIdentity.interfaces?.map(i => `${i.name} (${i.ip})`).join(', ')}`}>
+              <Laptop size={11} color="#27ae60"/>
+              <span>{hostIdentity.hostname || 'HOST'} [{hostIdentity.primary_ip || '127.0.0.1'}]</span>
+            </div>
+          )}
+
+          {/* Current cycle */}
+          {currentCycle && (
+            <div className="cycle-chip" title={`Started at ${formatTime(currentCycle.started_at)}`}>
+              <Activity size={11}/>
+              <span>{currentCycle.cycle_id?.substring(0, 18)}</span>
+            </div>
+          )}
+
+          <button
+            className="btn btn-sm"
+            onClick={handleStartNewCycle}
+            title="Archive current cycle & start fresh"
+            style={{ fontSize: '0.62rem', padding: '2px 8px' }}
+          >
+            <RotateCcw size={10}/> NEW_CYCLE
+          </button>
+
+          <button
+            className="btn btn-sm"
+            onClick={() => setWellbeingOpen(true)}
+            title="View network wellbeing audit history"
+            style={{ fontSize: '0.62rem', padding: '2px 8px' }}
+          >
+            <HeartPulse size={10} color="var(--severity-low)"/> WELLBEING
+          </button>
+
           <div className="header-indicator">
             <span className={`dot ${systemStatus === 'nominal' ? '' : systemStatus}`}/>
             {health?.model_loaded ? `MODEL: ${health.device?.toUpperCase() || 'CPU'}` : 'MODEL: LOADING'}
@@ -286,11 +517,12 @@ export default function App() {
             onSelectSession={onSelectSession}
             featureList={featureList}
             systemMode={systemMode}
+            liveFlows={liveFlows}
           />
         )}
         {view === 'forecast' && <ForecastView session={selectedSession} onBack={() => setView('dashboard')} featureList={featureList}/>}
         {view === 'alerts' && <AlertsView/>}
-        {view === 'live_logs' && <LiveLogsView/>}
+        {view === 'live_logs' && <LiveLogsView lines={liveFlows} connected={wsConnected}/>}
         {view === 'explain' && <ExplainView featureList={featureList}/>}
         {view === 'reports' && <ReportsView/>}
         {view === 'ingest' && <IngestPanel/>}
@@ -306,6 +538,9 @@ export default function App() {
           />
         )}
       </main>
+
+      {/* Wellbeing Audit Modal */}
+      <WellbeingModal isOpen={wellbeingOpen} onClose={() => setWellbeingOpen(false)}/>
 
       {/* ── Footer ── */}
       <footer className="footer">
@@ -367,15 +602,16 @@ function KillChainCompact({ currentStage }) {
 
 
 // ═══════════════════════════════════════════════════════════════
-// DASHBOARD — stats + sessions table with kill chain
+// DASHBOARD — stats + sessions table + real-time flow stream
 // ═══════════════════════════════════════════════════════════════
-function Dashboard({ onSelectSession, systemMode }) {
+function Dashboard({ onSelectSession, systemMode, liveFlows = [] }) {
   const [sessions, setSessions] = useState([]);
   const [stats, setStats] = useState({});
   const [alertStats, setAlertStats] = useState({});
   const [loading, setLoading] = useState(true);
   const [simBannerDismissed, setSimBannerDismissed] = useState(false);
   const [sortBy, setSortBy] = useState('last_seen');
+  const [dashboardTab, setDashboardTab] = useState('sessions'); // 'sessions' | 'live_flows'
 
   const refresh = useCallback(() => {
     const srcParam = systemMode === 'live' ? '&source=live' : '';
@@ -399,8 +635,8 @@ function Dashboard({ onSelectSession, systemMode }) {
 
   return (
     <>
-      {/* §7 — Simulation banner */}
-      {stats.has_simulated_data && !simBannerDismissed && (
+      {/* §7 — Simulation banner (BUG FIX: only show in simulated mode) */}
+      {systemMode === 'simulated' && stats.has_simulated_data && !simBannerDismissed && (
         <div style={{
           background: 'linear-gradient(90deg, rgba(230,126,34,0.12), rgba(230,126,34,0.06))',
           border: '1px solid var(--accent)',
@@ -411,7 +647,7 @@ function Dashboard({ onSelectSession, systemMode }) {
         }}>
           <FlaskConical size={13} color="var(--accent)"/>
           <span className="mono" style={{ fontSize: '0.67rem', color: 'var(--accent)', flex: 1 }}>
-            SIMULATION DATA ACTIVE — traffic was generated by <code>traffic_simulator.py</code>, not captured from a real network interface.
+            SIMULATION DATA ACTIVE — synthetic flows generated by <code>traffic_simulator.py</code> are present.
           </span>
           <button className="btn btn-sm" onClick={() => setSimBannerDismissed(true)} style={{ fontSize: '0.6rem' }}>DISMISS</button>
         </div>
@@ -441,7 +677,7 @@ function Dashboard({ onSelectSession, systemMode }) {
         </div>
         {stats.direction_breakdown && (
           <div className="stat-card">
-            <div className="stat-card-label">INBOUND</div>
+            <div className="stat-card-label">INBOUND (RX)</div>
             <div className="stat-card-value" style={{ color: 'var(--severity-high)', fontSize: '1rem' }}>
               {stats.direction_breakdown.inbound || 0}
             </div>
@@ -449,7 +685,7 @@ function Dashboard({ onSelectSession, systemMode }) {
         )}
         {stats.direction_breakdown && (
           <div className="stat-card">
-            <div className="stat-card-label">OUTBOUND</div>
+            <div className="stat-card-label">OUTBOUND (TX)</div>
             <div className="stat-card-value" style={{ color: 'var(--accent)', fontSize: '1rem' }}>
               {stats.direction_breakdown.outbound || 0}
             </div>
@@ -457,13 +693,26 @@ function Dashboard({ onSelectSession, systemMode }) {
         )}
       </div>
 
-      {/* Sessions table header bar with mode indication */}
+      {/* View switcher and mode indication */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-2)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
-          <span className="section-label" style={{ marginBottom: 0 }}>ACTIVE_SESSIONS</span>
-          <span className="mono text-sm" style={{ color: 'var(--text-muted)' }}>({sessions.length})</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
+          <div className="tab-group">
+            <button
+              className={`tab-btn ${dashboardTab === 'sessions' ? 'active' : ''}`}
+              onClick={() => setDashboardTab('sessions')}
+            >
+              ACTIVE SESSIONS ({sessions.length})
+            </button>
+            <button
+              className={`tab-btn ${dashboardTab === 'live_flows' ? 'active' : ''}`}
+              onClick={() => setDashboardTab('live_flows')}
+            >
+              REAL-TIME FLOWS ({liveFlows.length})
+            </button>
+          </div>
         </div>
-        {/* Read-only indication badge based on Settings mode */}
+
+        {/* Operating mode badge */}
         <div style={{
           display: 'inline-flex',
           alignItems: 'center',
@@ -488,75 +737,186 @@ function Dashboard({ onSelectSession, systemMode }) {
         </div>
       </div>
 
-      {/* Sessions table */}
-      <div className="data-table-wrap">
-        {loading ? (
-          <div className="empty-state"><div className="loading-spinner"/><p>Loading sessions...</p></div>
-        ) : sessions.length === 0 ? (
-          <div className="empty-state">
-            <Database size={28} color="var(--text-muted)"/>
-            <p>No sessions yet. Ingest flow data or run the traffic simulator.</p>
-          </div>
-        ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>SRC_IP</th>
-                <th>DST_IP</th>
-                <th style={{ cursor: 'pointer' }} onClick={() => setSortBy('flow_count')}>FLOWS {sortBy === 'flow_count' ? '▼' : ''}</th>
-                <th style={{ cursor: 'pointer' }} onClick={() => setSortBy('latest_risk_score')}>RISK {sortBy === 'latest_risk_score' ? '▼' : ''}</th>
-                <th>STAGE</th>
-                <th>MAX_STAGE</th>
-                <th>DIR</th>
-                <th>SRC</th>
-                <th>KILL_CHAIN</th>
-                <th style={{ cursor: 'pointer' }} onClick={() => setSortBy('last_seen')}>LAST_SEEN {sortBy === 'last_seen' ? '▼' : ''}</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {sessions.map(s => {
-                const isCompromised = stageIndex(s.latest_stage) >= 3 && (s.latest_risk_score || 0) > 0.5;
-                return (
-                  <tr
-                    key={s.session_key}
-                    onClick={() => onSelectSession(s)}
-                    style={{
-                      background: isCompromised
-                        ? `linear-gradient(90deg, rgba(192,57,43,0.06), transparent)`
-                        : undefined,
-                    }}
-                  >
-                    <td>{s.src_ip || '\u2014'}</td>
-                    <td>{s.dst_ip || '\u2014'}</td>
-                    <td>{s.flow_count}</td>
-                    <td>
-                      <div className="risk-cell">
-                        <div className={`risk-bar ${severityClass(s.latest_risk_score)}`}/>
-                        <span>{formatProb(s.latest_risk_score)}</span>
-                      </div>
-                    </td>
-                    <td>
-                      <span className={`stage-badge ${stageClass(s.latest_stage)}`}>{s.latest_stage}</span>
-                      <CompromiseIndicator stage={s.latest_stage} riskScore={s.latest_risk_score}/>
-                    </td>
-                    <td>
-                      <span className={`stage-badge ${stageClass(s.max_stage_reached || 'Benign')}`} style={{ opacity: 0.75, fontSize: '0.58rem' }}>
-                        {s.max_stage_reached || 'Benign'}
-                      </span>
-                    </td>
-                    <td><DirBadge dir={s.direction}/></td>
-                    <td><SourceBadge src={s.source}/></td>
-                    <td><KillChainCompact currentStage={s.max_stage_reached || s.latest_stage}/></td>
-                    <td>{formatTime(s.last_seen)}</td>
-                    <td><ChevronRight size={13} color="var(--text-muted)"/></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </div>
+      {/* Active Sessions Tab */}
+      {dashboardTab === 'sessions' && (
+        <div className="data-table-wrap">
+          {loading ? (
+            <div className="empty-state"><div className="loading-spinner"/><p>Loading sessions...</p></div>
+          ) : sessions.length === 0 ? (
+            <div className="empty-state">
+              <Database size={28} color="var(--text-muted)"/>
+              <p>No active sessions in this cycle. Waiting for network telemetry...</p>
+            </div>
+          ) : (
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>APPLICATION</th>
+                  <th>DIR</th>
+                  <th>SOURCE (PEER / HOST)</th>
+                  <th>DESTINATION</th>
+                  <th>PACKETS (TX / RX)</th>
+                  <th style={{ cursor: 'pointer' }} onClick={() => setSortBy('flow_count')}>FLOWS {sortBy === 'flow_count' ? '▼' : ''}</th>
+                  <th style={{ cursor: 'pointer' }} onClick={() => setSortBy('latest_risk_score')}>RISK {sortBy === 'latest_risk_score' ? '▼' : ''}</th>
+                  <th>STAGE</th>
+                  <th>KILL_CHAIN</th>
+                  <th style={{ cursor: 'pointer' }} onClick={() => setSortBy('last_seen')}>LAST_SEEN {sortBy === 'last_seen' ? '▼' : ''}</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {sessions.map(s => {
+                  const isCompromised = stageIndex(s.latest_stage) >= 3 && (s.latest_risk_score || 0) > 0.5;
+                  return (
+                    <tr
+                      key={s.session_key}
+                      onClick={() => onSelectSession(s)}
+                      style={{
+                        background: isCompromised
+                          ? `linear-gradient(90deg, rgba(192,57,43,0.06), transparent)`
+                          : undefined,
+                      }}
+                    >
+                      <td>
+                        <AppBadge appName={s.app_name} processName={s.process_name}/>
+                      </td>
+                      <td><DirBadge dir={s.direction}/></td>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <span className="mono">{s.src_ip || '—'}</span>
+                          <IdentityBadge identity={s.src_identity}/>
+                        </div>
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <span className="mono">{s.dst_ip || '—'}</span>
+                          <IdentityBadge identity={s.dst_identity}/>
+                        </div>
+                      </td>
+                      <td>
+                        <PacketStat fwdPkts={s.tot_fwd_pkts} bwdPkts={s.tot_bwd_pkts} proto="IP"/>
+                      </td>
+                      <td className="mono">{s.flow_count}</td>
+                      <td>
+                        <div className="risk-cell">
+                          <div className={`risk-bar ${severityClass(s.latest_risk_score)}`}/>
+                          <span>{formatProb(s.latest_risk_score)}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <span className={`stage-badge ${stageClass(s.latest_stage)}`}>{s.latest_stage}</span>
+                        <CompromiseIndicator stage={s.latest_stage} riskScore={s.latest_risk_score}/>
+                      </td>
+                      <td><KillChainCompact currentStage={s.max_stage_reached || s.latest_stage}/></td>
+                      <td className="mono text-xs">{formatTime(s.last_seen)}</td>
+                      <td>
+                        <button
+                          className="btn btn-sm btn-primary"
+                          style={{ fontSize: '0.6rem', padding: '2px 8px' }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSelectSession(s);
+                          }}
+                        >
+                          FORECAST
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* Real-Time Live Flows Tab */}
+      {dashboardTab === 'live_flows' && (
+        <div className="data-table-wrap">
+          {liveFlows.length === 0 ? (
+            <div className="empty-state">
+              <Radio size={28} color="var(--text-muted)"/>
+              <p>Waiting for real-time live flow packets...</p>
+              <span className="mono text-xs text-muted">Flows captured via scapy / Npcap or simulator stream here automatically.</span>
+            </div>
+          ) : (
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>TIME</th>
+                  <th>APPLICATION</th>
+                  <th>DIR</th>
+                  <th>SOURCE → DESTINATION</th>
+                  <th>PROTO</th>
+                  <th>PACKETS (TX / RX)</th>
+                  <th>P(INFIL)</th>
+                  <th>STAGE</th>
+                  <th>ACTION</th>
+                </tr>
+              </thead>
+              <tbody>
+                {liveFlows.map((f, i) => {
+                  const prob = f.infiltration_prob;
+                  const isAlert = (prob || 0) > 0.5;
+                  return (
+                    <tr key={i} style={{ background: isAlert ? 'rgba(192,57,43,0.06)' : undefined }}>
+                      <td className="mono text-xs">{formatTime(f.timestamp || f._ts)}</td>
+                      <td>
+                        <AppBadge appName={f.app_name} processName={f.process_name} iconType={f.app_icon}/>
+                      </td>
+                      <td><DirBadge dir={f.direction}/></td>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }} className="mono text-xs">
+                          <span>{f.src_ip || '?'}{f.src_port ? `:${f.src_port}` : ''}</span>
+                          <IdentityBadge identity={f.src_identity}/>
+                          <span style={{ color: 'var(--text-muted)' }}>&rarr;</span>
+                          <span>{f.dst_ip || '?'}{f.dst_port ? `:${f.dst_port}` : ''}</span>
+                          <IdentityBadge identity={f.dst_identity}/>
+                        </div>
+                      </td>
+                      <td><span className="mono text-xs text-muted">{f.protocol || 'TCP'}</span></td>
+                      <td>
+                        <PacketStat
+                          fwdPkts={f.tot_fwd_pkts}
+                          bwdPkts={f.tot_bwd_pkts}
+                          bytesPerSec={f.flow_bytes_s}
+                          proto={f.protocol}
+                        />
+                      </td>
+                      <td>
+                        <div className="risk-cell">
+                          <div className={`risk-bar ${severityClass(prob)}`}/>
+                          <span>{formatProb(prob)}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <span className={`stage-badge ${stageClass(f.predicted_stage || 'Benign')}`}>
+                          {f.predicted_stage || 'Benign'}
+                        </span>
+                      </td>
+                      <td>
+                        <button
+                          className="btn btn-sm btn-primary"
+                          style={{ fontSize: '0.6rem', padding: '2px 8px' }}
+                          onClick={() => onSelectSession({
+                            session_key: f.session_key,
+                            src_ip: f.src_ip,
+                            dst_ip: f.dst_ip,
+                            latest_stage: f.predicted_stage || 'Benign',
+                            latest_risk_score: f.infiltration_prob || 0.0,
+                          })}
+                        >
+                          FORECAST
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
     </>
   );
 }
@@ -838,41 +1198,8 @@ function ForecastView({ session, onBack, featureList }) {
 // ═══════════════════════════════════════════════════════════════
 // LIVE LOGS — WebSocket terminal feed
 // ═══════════════════════════════════════════════════════════════
-function LiveLogsView() {
-  const [lines, setLines] = useState([]);
-  const [connected, setConnected] = useState(false);
+function LiveLogsView({ lines = [], connected = false }) {
   const containerRef = useRef(null);
-  const wsRef = useRef(null);
-
-  useEffect(() => {
-    const ws = createWebSocket();
-    wsRef.current = ws;
-
-    ws.onopen = () => setConnected(true);
-    ws.onclose = () => setConnected(false);
-    ws.onerror = () => setConnected(false);
-
-    ws.onmessage = (evt) => {
-      try {
-        const data = JSON.parse(evt.data);
-        if (data.type === 'pong') return;
-        setLines(prev => {
-          const next = [...prev, { ...data, _ts: new Date().toISOString() }];
-          return next.length > 500 ? next.slice(-500) : next;
-        });
-      } catch { /* ignore non-JSON */ }
-    };
-
-    // Ping keepalive
-    const pingIv = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) ws.send('ping');
-    }, 15000);
-
-    return () => {
-      clearInterval(pingIv);
-      ws.close();
-    };
-  }, []);
 
   // Auto-scroll
   useEffect(() => {
@@ -903,29 +1230,26 @@ function LiveLogsView() {
         ) : (
           lines.map((line, i) => (
             <div key={i} className="terminal-line">
-              <span className="ts">{formatTime(line._ts)}</span>
+              <span className="ts">{formatTime(line._ts || line.timestamp)}</span>
               <span className="sep"> | </span>
-              <span className="ip">{line.src_ip || '?'} &rarr; {line.dst_ip || '?'}</span>
+              <span className="mono" style={{ color: 'var(--text-secondary)' }}>
+                {line.app_name || line.process_name ? `[${line.app_name || line.process_name}] ` : ''}
+              </span>
+              <span className="ip">
+                {line.src_ip || '?'}{line.src_port ? `:${line.src_port}` : ''} &rarr; {line.dst_ip || '?'}{line.dst_port ? `:${line.dst_port}` : ''}
+              </span>
               <span className="sep"> | </span>
               <DirBadge dir={line.direction}/>
               <span className="sep"> | </span>
               <SourceBadge src={line.source}/>
               <span className="sep"> | </span>
-              <span className="val">{line.flow_count || 0} flows</span>
+              <span className="val">TX: {line.tot_fwd_pkts || 0} / RX: {line.tot_bwd_pkts || 0}</span>
               <span className="sep"> | </span>
               <span className="val">P={formatProb(line.infiltration_prob)}</span>
               <span className="sep"> | </span>
               <span className="stage-flag">{line.predicted_stage || 'Benign'}</span>
               {(line.infiltration_prob || 0) > 0.5 && (
                 <span className="alert-flag"> &#9650; ALERT</span>
-              )}
-              {line.max_stage_reached && line.max_stage_reached !== line.predicted_stage && (
-                <span className="sep"> max=</span>
-              )}
-              {line.max_stage_reached && line.max_stage_reached !== line.predicted_stage && (
-                <span className={`stage-flag ${stageClass(line.max_stage_reached)}`}>
-                  {line.max_stage_reached}
-                </span>
               )}
             </div>
           ))

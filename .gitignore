@@ -21,6 +21,7 @@ frontend/dist/
 # Database & Runtime Data
 backend/data/*.db
 backend/data/*.sqlite3
+backend/data/archives/*.json
 *.db
 *.sqlite3
 
