@@ -153,7 +153,7 @@ class PcapFlowState:
             "rst_flag_cnt": float(self.rst_count),
             "psh_flag_cnt": float(self.psh_count),
             "urg_flag_cnt": float(self.urg_count),
-            "down_up_ratio": float(self.bwd_bytes / max(self.fwd_bytes, 1)),
+            "down_up_ratio": float(self.bwd_packets / max(self.fwd_packets, 1)),
             "pkt_size_avg": float(total_bytes / max(total_pkts, 1)),
             "ttl_variance": float(np.var(self.ttl_values)) if len(self.ttl_values) > 1 else 0.0,
             "tcp_win_size": float(np.mean(self.tcp_win_sizes)) if self.tcp_win_sizes else 0.0,

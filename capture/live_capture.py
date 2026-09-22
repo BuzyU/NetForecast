@@ -1,11 +1,10 @@
 import argparse
+import json
+import logging
 import sys
 import time
-import logging
-import json
-from datetime import datetime, timezone
-from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Optional
 
 import numpy as np
@@ -28,13 +27,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 try:
-    from scapy.all import sniff, rdpcap, Raw, get_if_list, conf
+    from scapy.all import conf, rdpcap, sniff
     from scapy.layers.inet import IP, TCP, UDP
 except ImportError:
     try:
         from scapy.all import (  # type: ignore
-            sniff, rdpcap, IP, TCP, UDP, Raw,
-            get_if_list, conf,
+            IP,
+            TCP,
+            UDP,
+            conf,
+            rdpcap,
+            sniff,
         )
     except ImportError:
         print("ERROR: scapy not installed. Run: pip install scapy")
@@ -173,7 +176,7 @@ class FlowState:
             "rst_flag_cnt": float(self.rst_count),
             "psh_flag_cnt": float(self.psh_count),
             "urg_flag_cnt": float(self.urg_count),
-            "down_up_ratio": float(self.bwd_bytes / max(self.fwd_bytes, 1)),
+            "down_up_ratio": float(self.bwd_packets / max(self.fwd_packets, 1)),
             "pkt_size_avg": float(total_bytes / max(total_pkts, 1)),
             "ttl_variance": float(np.var(self.ttl_values)) if len(self.ttl_values) > 1 else 0.0,
             "tcp_win_size": float(np.mean(self.tcp_win_sizes)) if self.tcp_win_sizes else 0.0,
@@ -343,7 +346,7 @@ class FlowExtractor:
 
     def print_stats(self):
         print(f"\n{'='*60}")
-        print(f"  Capture Statistics")
+        print("  Capture Statistics")
         print(f"  Total packets processed: {self.total_packets}")
         print(f"  Flows exported:          {self.exported_count}")
         print(f"  Alerts triggered:        {self.alerts_triggered}")
