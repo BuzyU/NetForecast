@@ -1,0 +1,70 @@
+# GitHub Dependabot Configuration
+# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+updates:
+  # 1. GitHub Actions Workflows
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Asia/Kolkata"
+    commit-message:
+      prefix: "ci(deps)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    open-pull-requests-limit: 10
+
+  # 2. Python Backend Dependencies (pip)
+  - package-ecosystem: "pip"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Asia/Kolkata"
+    commit-message:
+      prefix: "build(deps-python)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "backend"
+      - "python"
+    open-pull-requests-limit: 10
+
+  # 3. Frontend Dependencies (npm)
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Asia/Kolkata"
+    commit-message:
+      prefix: "build(deps-frontend)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "frontend"
+      - "javascript"
+    open-pull-requests-limit: 10
+
+  # 4. Docker Base Images
+  - package-ecosystem: "docker"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Asia/Kolkata"
+    commit-message:
+      prefix: "build(docker)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "docker"
+    open-pull-requests-limit: 5
