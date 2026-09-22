@@ -53,16 +53,9 @@ async def lifespan(app: FastAPI):
     await init_db()
     await _migrate_db()
 
-    # Automatically archive any past session data and start fresh cycle on startup
-    from .database import async_session
-    from .routes.system import archive_and_reset_cycle
-    try:
-        async with async_session() as db:
-            res = await archive_and_reset_cycle(db, reason="startup")
-            logger.info("Fresh cycle initialized on startup: %s (archived %d flows, %d sessions)",
-                        res.get("new_cycle_id"), res.get("archived_flows", 0), res.get("archived_sessions", 0))
-    except Exception as e:
-        logger.warning("Startup cycle archival skipped: %s", e)
+    # Preserve active session and cycle data across hot-reloads and window switches
+    from .routes.system import CycleState
+    logger.info("Active monitoring cycle preserved: %s (started %s)", CycleState.cycle_id, CycleState.started_at.isoformat())
 
     logger.info("=" * 60)
     logger.info("Service ready — all systems operational")
@@ -72,6 +65,8 @@ async def lifespan(app: FastAPI):
 
     logger.info("Shutting down... archiving active cycle to disk...")
     try:
+        from .database import async_session
+        from .routes.system import archive_and_reset_cycle
         async with async_session() as db:
             await archive_and_reset_cycle(db, reason="shutdown")
     except Exception as e:

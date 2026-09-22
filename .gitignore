@@ -39,3 +39,4 @@ real_flows.csv
 data/*.pcap
 data/*.pcapng
 *.tmp
+scratch/

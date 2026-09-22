@@ -69,8 +69,8 @@ function IdentityBadge({ identity }) {
 }
 
 // Application & Process badge with icon
-function AppBadge({ appName, processName, iconType }) {
-  const name = appName || processName || 'General Net';
+function AppBadge({ name: propName, appName, processName, iconType }) {
+  const name = propName || appName || processName || 'General Net';
   const nameLower = name.toLowerCase();
   let badgeClass = 'app-generic';
   let Icon = Network;
@@ -949,11 +949,16 @@ function ForecastView({ session, onBack, featureList }) {
         const allFlows = await apiFetch(`/sessions/${encodeURIComponent(sessionKey)}/flows?limit=100`);
         if (!active) return;
         setFlows(allFlows);
-        if (allFlows.length < 6) {
-          setError(`Need at least 6 flows for forecast, have ${allFlows.length}`);
+        if (!allFlows || allFlows.length === 0) {
+          setError('No flow records captured for this session yet.');
           return;
         }
-        const window = allFlows.slice(0, 6).reverse().map(f => featOrder.map(k => f.features?.[k] ?? 0));
+        let windowFlows = allFlows.slice(0, 6).reverse();
+        // Pad window up to 6 flows if session has fewer than 6 flows
+        while (windowFlows.length < 6) {
+          windowFlows.unshift(windowFlows[0]);
+        }
+        const window = windowFlows.map(f => featOrder.map(k => f.features?.[k] ?? 0));
         const [fc, exp] = await Promise.all([
           apiPost('/forecast', { window, k_steps: 6, n_mc_samples: 20, needs_scaling: true }),
           apiPost('/explain', { window, top_k: 10, needs_scaling: true }),
@@ -1028,6 +1033,23 @@ function ForecastView({ session, onBack, featureList }) {
         {forecast?.alert_triggered && (
           <span className="severity-badge critical">ALERT AT STEP +{forecast.alert_at_step}</span>
         )}
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 'var(--sp-2)' }}>
+          <button
+            className="btn btn-sm"
+            onClick={() => window.open(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/forecast/view/html?session_key=${encodeURIComponent(session.session_key)}`, '_blank')}
+            title="Open printable forecast dossier in a new browser tab"
+          >
+            👁️ VIEW REPORT
+          </button>
+          <a
+            className="btn btn-sm btn-primary"
+            href={`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/forecast/export/html?session_key=${encodeURIComponent(session.session_key)}`}
+            download
+            style={{ textDecoration: 'none' }}
+          >
+            📄 EXPORT FORECAST HTML
+          </a>
+        </div>
       </div>
 
       {/* Kill Chain — full width hero */}
@@ -1352,26 +1374,59 @@ function ExplainView({ featureList }) {
   const [selected, setSelected] = useState(null);
   const [explanation, setExplanation] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [method, setMethod] = useState('shap');
+  const [error, setError] = useState(null);
+  const [method, setMethod] = useState('gradient'); // Default to fast gradient for instant UI responsiveness
+  const [searchQuery, setSearchQuery] = useState('');
 
   const featOrder = featureList || DEFAULT_FEAT_ORDER;
 
-  useEffect(() => {
-    apiFetch('/sessions?limit=50').then(setSessions).catch(() => {});
-  }, []);
-
-  const explain = (session, methodToUse = method) => {
+  const explain = useCallback((session, methodToUse = method) => {
+    if (!session) return;
     setSelected(session);
     setLoading(true);
+    setError(null);
     apiFetch(`/sessions/${encodeURIComponent(session.session_key)}/flows?limit=6`)
       .then(flows => {
-        if (flows.length < 6) throw new Error('Need 6+ flows');
-        const window = flows.slice(0, 6).reverse().map(f => featOrder.map(k => f.features?.[k] ?? 0));
+        if (!flows || flows.length === 0) {
+          throw new Error('No flow records captured for this session yet.');
+        }
+        let windowFlows = flows.slice(0, 6).reverse();
+        // Pad window up to 6 flows if session has fewer than 6 flows
+        while (windowFlows.length < 6) {
+          windowFlows.unshift(windowFlows[0]);
+        }
+        const window = windowFlows.map(f => featOrder.map(k => f.features?.[k] ?? 0));
         return apiPost('/explain', { window, top_k: 22, needs_scaling: true, method: methodToUse });
       })
-      .then(result => { setExplanation(result); setLoading(false); })
-      .catch(() => { setLoading(false); });
-  };
+      .then(result => {
+        setExplanation(result);
+        setLoading(false);
+      })
+      .catch(err => {
+        setError(err.message || 'Failed to compute feature attribution.');
+        setLoading(false);
+      });
+  }, [featOrder, method]);
+
+  useEffect(() => {
+    let mounted = true;
+    apiFetch('/sessions?limit=50')
+      .then(data => {
+        if (!mounted) return;
+        const list = Array.isArray(data) ? data : [];
+        setSessions(list);
+        if (list.length > 0) {
+          setSelected(prev => {
+            if (prev && list.some(s => s.session_key === prev.session_key)) return prev;
+            const highestRisk = [...list].sort((a, b) => (b.latest_risk_score || 0) - (a.latest_risk_score || 0))[0];
+            explain(highestRisk, 'gradient');
+            return highestRisk;
+          });
+        }
+      })
+      .catch(() => {});
+    return () => { mounted = false; };
+  }, [explain]);
 
   const handleMethodChange = (newMethod) => {
     setMethod(newMethod);
@@ -1380,80 +1435,183 @@ function ExplainView({ featureList }) {
     }
   };
 
-  const maxImp = explanation?.attributions
-    ? Math.max(...explanation.attributions.map(a => Math.abs(a.importance)))
+  const maxImp = (explanation?.attributions && explanation.attributions.length > 0)
+    ? (Math.max(...explanation.attributions.map(a => Math.abs(a.importance))) || 1)
     : 1;
 
+  const filteredSessions = sessions.filter(s => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      (s.src_ip || '').toLowerCase().includes(q) ||
+      (s.dst_ip || '').toLowerCase().includes(q) ||
+      (s.app_name || '').toLowerCase().includes(q) ||
+      (s.process_name || '').toLowerCase().includes(q) ||
+      (s.latest_stage || '').toLowerCase().includes(q)
+    );
+  });
+
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 'var(--sp-4)' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 'var(--sp-4)' }}>
       {/* Session picker */}
       <div className="panel">
-        <div className="panel-header">
+        <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span className="panel-title">SELECT_SESSION</span>
+          <span className="panel-meta">{filteredSessions.length} sessions</span>
         </div>
-        <div style={{ maxHeight: 'calc(100vh - 200px)', overflowY: 'auto' }}>
-          {sessions.map(s => (
-            <div
-              key={s.session_key}
-              onClick={() => explain(s)}
-              style={{
-                padding: 'var(--sp-2) var(--sp-3)',
-                borderBottom: '1px solid var(--border-muted)',
-                cursor: 'pointer',
-                background: selected?.session_key === s.session_key ? 'var(--accent-muted)' : 'transparent',
-              }}
-            >
-              <div className="mono" style={{ fontSize: '0.7rem' }}>{s.src_ip} &rarr; {s.dst_ip}</div>
-              <div style={{ display: 'flex', gap: 'var(--sp-2)', marginTop: '2px', alignItems: 'center' }}>
-                <span className={`stage-badge ${stageClass(s.latest_stage)}`}>{s.latest_stage}</span>
-                <span className="mono text-muted" style={{ fontSize: '0.6rem' }}>{s.flow_count} flows</span>
-              </div>
+        <div style={{ padding: 'var(--sp-2)', borderBottom: '1px solid var(--border-muted)' }}>
+          <input
+            type="text"
+            placeholder="Filter by IP, App, or Stage..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '4px 8px',
+              fontSize: '0.7rem',
+              background: 'var(--surface)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius)',
+              color: 'var(--text-primary)',
+              fontFamily: 'var(--font-mono)',
+            }}
+          />
+        </div>
+        <div style={{ maxHeight: 'calc(100vh - 240px)', overflowY: 'auto' }}>
+          {filteredSessions.length === 0 ? (
+            <div className="empty-state" style={{ padding: 'var(--sp-6)' }}>
+              <p>No matching sessions found.</p>
             </div>
-          ))}
+          ) : (
+            filteredSessions.map(s => (
+              <div
+                key={s.session_key}
+                onClick={() => explain(s)}
+                style={{
+                  padding: 'var(--sp-2) var(--sp-3)',
+                  borderBottom: '1px solid var(--border-muted)',
+                  cursor: 'pointer',
+                  background: selected?.session_key === s.session_key ? 'var(--accent-muted)' : 'transparent',
+                  transition: 'background 0.15s ease',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
+                  <AppBadge name={s.app_name || s.process_name} processName={s.process_name}/>
+                  <DirBadge dir={s.direction}/>
+                </div>
+                <div className="mono" style={{ fontSize: '0.68rem', margin: '2px 0' }}>
+                  {s.src_ip} <IdentityBadge type={s.src_identity}/> &rarr; {s.dst_ip} <IdentityBadge type={s.dst_identity}/>
+                </div>
+                <div style={{ display: 'flex', gap: 'var(--sp-2)', marginTop: '2px', alignItems: 'center' }}>
+                  <span className={`stage-badge ${stageClass(s.latest_stage)}`}>{s.latest_stage}</span>
+                  <span className="mono text-muted" style={{ fontSize: '0.6rem' }}>{s.flow_count} flows</span>
+                  <span className="mono" style={{ fontSize: '0.6rem', marginLeft: 'auto', color: (s.latest_risk_score || 0) > 0.5 ? 'var(--severity-critical)' : 'var(--text-muted)' }}>
+                    {formatProb(s.latest_risk_score || 0)}
+                  </span>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
 
       {/* Attribution display */}
       <div className="panel">
-        <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--sp-2)' }}>
           <div>
             <span className="panel-title">FEATURE_ATTRIBUTION</span>
             <span className="panel-meta" style={{ marginLeft: 'var(--sp-2)' }}>
-              {explanation?.method_used === 'shap' ? 'SHAP Values (KernelExplainer)' : 'Gradient × Input'} (all 22 features)
+              {explanation?.method_used === 'shap' ? 'SHAP Values (KernelExplainer)' : 'Gradient × Input'} (all 22 flow features)
             </span>
           </div>
-          <div style={{ display: 'inline-flex', gap: 4, background: 'var(--surface)', padding: 2, borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
-            <button
-              className={`btn btn-sm ${method === 'shap' ? 'btn-primary' : ''}`}
-              onClick={() => handleMethodChange('shap')}
-              style={{ fontSize: '0.65rem', padding: '2px 8px' }}
-            >
-              SHAP
-            </button>
-            <button
-              className={`btn btn-sm ${method === 'gradient' ? 'btn-primary' : ''}`}
-              onClick={() => handleMethodChange('gradient')}
-              style={{ fontSize: '0.65rem', padding: '2px 8px' }}
-            >
-              GRADIENT
-            </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+            <div style={{ display: 'inline-flex', gap: 4, background: 'var(--surface)', padding: 2, borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
+              <button
+                className={`btn btn-sm ${method === 'gradient' ? 'btn-primary' : ''}`}
+                onClick={() => handleMethodChange('gradient')}
+                style={{ fontSize: '0.65rem', padding: '2px 8px' }}
+                title="Fast sub-second gradient attribution"
+              >
+                FAST (GRADIENT)
+              </button>
+              <button
+                className={`btn btn-sm ${method === 'shap' ? 'btn-primary' : ''}`}
+                onClick={() => handleMethodChange('shap')}
+                style={{ fontSize: '0.65rem', padding: '2px 8px' }}
+                title="Deep game-theoretic Shapley value attribution (~3-5s)"
+              >
+                DEEP (SHAP)
+              </button>
+            </div>
+
+            {/* Export Toolbar */}
+            <div style={{ display: 'inline-flex', gap: 4 }}>
+              <button
+                className="btn btn-sm"
+                onClick={() => {
+                  if (!selected) return;
+                  const url = `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/explain/view/html?session_key=${encodeURIComponent(selected.session_key)}&method=${method}`;
+                  window.open(url, '_blank');
+                }}
+                disabled={!selected}
+                style={{ fontSize: '0.65rem', padding: '2px 8px' }}
+                title="Open printable feature attribution report in a new tab"
+              >
+                👁️ VIEW REPORT
+              </button>
+              <a
+                className="btn btn-sm btn-primary"
+                href={selected ? `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/explain/export/html?session_key=${encodeURIComponent(selected.session_key)}&method=${method}` : '#'}
+                download
+                style={{ fontSize: '0.65rem', padding: '2px 8px', textDecoration: 'none', pointerEvents: selected ? 'auto' : 'none', opacity: selected ? 1 : 0.5 }}
+              >
+                📄 EXPORT HTML
+              </a>
+              <a
+                className="btn btn-sm"
+                href={selected ? `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/explain/export/csv?session_key=${encodeURIComponent(selected.session_key)}&method=${method}` : '#'}
+                download
+                style={{ fontSize: '0.65rem', padding: '2px 8px', textDecoration: 'none', pointerEvents: selected ? 'auto' : 'none', opacity: selected ? 1 : 0.5 }}
+              >
+                CSV
+              </a>
+              <a
+                className="btn btn-sm"
+                href={selected ? `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/explain/export/json?session_key=${encodeURIComponent(selected.session_key)}&method=${method}` : '#'}
+                download
+                style={{ fontSize: '0.65rem', padding: '2px 8px', textDecoration: 'none', pointerEvents: selected ? 'auto' : 'none', opacity: selected ? 1 : 0.5 }}
+              >
+                JSON
+              </a>
+            </div>
           </div>
         </div>
         <div className="panel-body">
           {loading ? (
-            <div className="empty-state"><div className="loading-spinner"/><p>Computing {method.toUpperCase()} attributions...</p></div>
+            <div className="empty-state">
+              <div className="loading-spinner"/>
+              <p>Computing {method.toUpperCase()} feature attributions for {selected?.app_name || selected?.process_name || 'session'}...</p>
+            </div>
+          ) : error ? (
+            <div className="empty-state">
+              <AlertTriangle size={28} color="var(--severity-high)"/>
+              <p>{error}</p>
+            </div>
           ) : !explanation ? (
-            <div className="empty-state"><Eye size={28} color="var(--text-muted)"/><p>Select a session to explain.</p></div>
+            <div className="empty-state">
+              <Eye size={28} color="var(--text-muted)"/>
+              <p>Select an active session from the left panel to explain its attack forecast.</p>
+            </div>
           ) : (
             <>
-              <div style={{ marginBottom: 'var(--sp-4)', display: 'flex', gap: 'var(--sp-4)', alignItems: 'baseline' }}>
+              <div style={{ marginBottom: 'var(--sp-4)', display: 'flex', gap: 'var(--sp-4)', alignItems: 'baseline', flexWrap: 'wrap' }}>
                 <div>
                   <span className="mono" style={{ fontSize: '1.3rem', fontWeight: 700 }}>{formatProb(explanation.infiltration_probability)}</span>
                   <span className="text-sm text-muted" style={{ marginLeft: 'var(--sp-2)' }}>P(INFILTRATION)</span>
                 </div>
                 <span className={`stage-badge ${stageClass(explanation.predicted_stage)}`}>{explanation.predicted_stage}</span>
                 <span className="mono text-muted" style={{ fontSize: '0.65rem', marginLeft: 'auto' }}>
-                  METHOD: {explanation.method_used?.toUpperCase()}
+                  METHOD: {explanation.method_used?.toUpperCase()} &bull; TOP_K: 22 FEATURES
                 </span>
               </div>
               <div className="shap-bar-container">
@@ -1483,62 +1641,118 @@ function ExplainView({ featureList }) {
 }
 
 
+
 // ═══════════════════════════════════════════════════════════════
-// REPORTS — aggregate stats + stage distribution
+// REPORTS — executive report, stage distribution, and forensic exports
 // ═══════════════════════════════════════════════════════════════
 function ReportsView() {
   const [stats, setStats] = useState({});
   const [alertStats, setAlertStats] = useState({});
   const [stageDist, setStageDist] = useState([]);
+  const [sessions, setSessions] = useState([]);
+  const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     Promise.all([
-      apiFetch('/dashboard/stats'),
-      apiFetch('/alerts/stats'),
+      apiFetch('/dashboard/stats').catch(() => ({})),
+      apiFetch('/alerts/stats').catch(() => ({})),
       apiFetch('/dashboard/stage-distribution').catch(() => []),
-    ]).then(([st, as, sd]) => {
-      setStats(st);
-      setAlertStats(as);
+      apiFetch('/sessions?limit=50').catch(() => []),
+      apiFetch('/alerts?limit=50').catch(() => []),
+    ]).then(([st, as, sd, sess, al]) => {
+      setStats(st || {});
+      setAlertStats(as || {});
       setStageDist(Array.isArray(sd) ? sd : []);
+      setSessions(Array.isArray(sess) ? sess : []);
+      setAlerts(Array.isArray(al) ? al : []);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
 
   const maxCount = stageDist.length > 0 ? Math.max(...stageDist.map(s => s.count)) : 1;
 
+  const downloadReport = async (format) => {
+    setExporting(true);
+    try {
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const url = `${baseUrl}/reports/export/${format}`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      const ext = format === 'csv' ? 'csv' : format === 'html' ? 'html' : 'json';
+      a.download = `netforecast_forensic_report_${new Date().toISOString().slice(0, 19).replace(/[:-]/g, '')}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      console.error(`Export ${format} failed:`, err);
+      // Fallback to window.open
+      window.open(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/reports/export/${format}`, '_blank');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const copySummary = () => {
     const summary = {
       generated_at: new Date().toISOString(),
-      total_sessions: stats.total_sessions,
-      total_flows: stats.total_flows,
-      at_risk_sessions: stats.at_risk_sessions,
-      total_alerts: alertStats.total,
-      unacknowledged_alerts: alertStats.unacknowledged,
-      critical_unacknowledged: alertStats.critical_unacknowledged,
+      total_sessions: stats.total_sessions || 0,
+      total_flows: stats.total_flows || 0,
+      at_risk_sessions: stats.at_risk_sessions || 0,
+      total_alerts: alertStats.total || 0,
+      unacknowledged_alerts: alertStats.unacknowledged || 0,
+      critical_unacknowledged: alertStats.critical_unacknowledged || 0,
       stage_distribution: stageDist,
+      top_sessions: sessions.slice(0, 10),
     };
     navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
   };
 
   if (loading) {
-    return <div className="empty-state"><div className="loading-spinner"/><p>Loading report data...</p></div>;
+    return <div className="empty-state"><div className="loading-spinner"/><p>Compiling forensic report data...</p></div>;
   }
 
   return (
     <>
+      {/* ── Action & Export Bar ── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-4)', flexWrap: 'wrap', gap: 'var(--sp-2)' }}>
-        <span className="section-label" style={{ marginBottom: 0 }}>SYSTEM_REPORT</span>
-        <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+        <div>
+          <span className="section-label" style={{ marginBottom: 2 }}>SECURITY_AUDIT // FORENSIC_REPORT</span>
+          <p className="text-sm text-muted">Comprehensive cyber attack progression & MITRE ATT&CK defense telemetry</p>
+        </div>
+        <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
           <button
             className="btn btn-sm"
-            onClick={() => window.open(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/reports/export/csv`, '_blank')}
+            onClick={() => window.open(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/reports/view/html`, '_blank')}
+            title="Open printable forensic dossier in a new browser tab"
+          >
+            👁️ VIEW REPORT
+          </button>
+          <button
+            className="btn btn-sm btn-primary"
+            onClick={() => downloadReport('html')}
+            disabled={exporting}
+            style={{ fontWeight: 700, padding: '4px 12px' }}
+          >
+            📄 EXPORT FORENSIC HTML
+          </button>
+          <button
+            className="btn btn-sm"
+            onClick={() => downloadReport('csv')}
+            disabled={exporting}
           >
             EXPORT CSV
           </button>
           <button
             className="btn btn-sm"
-            onClick={() => window.open(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/reports/export/json`, '_blank')}
+            onClick={() => downloadReport('json')}
+            disabled={exporting}
           >
             EXPORT JSON
           </button>
@@ -1546,11 +1760,12 @@ function ReportsView() {
         </div>
       </div>
 
-      <div className="report-grid">
+      {/* ── Summary & Stage Distribution Grid ── */}
+      <div className="report-grid mb-4">
         {/* Stats panel */}
         <div className="panel">
           <div className="panel-header">
-            <span className="panel-title">SUMMARY_STATS</span>
+            <span className="panel-title">TELEMETRY_METRICS</span>
           </div>
           <div className="panel-body">
             <div className="settings-row"><span className="settings-key">TOTAL_SESSIONS</span><span className="settings-val">{stats.total_sessions || 0}</span></div>
@@ -1565,7 +1780,7 @@ function ReportsView() {
         {/* Stage distribution */}
         <div className="panel">
           <div className="panel-header">
-            <span className="panel-title">STAGE_DISTRIBUTION</span>
+            <span className="panel-title">MITRE_STAGE_DISTRIBUTION</span>
           </div>
           <div className="panel-body">
             {stageDist.length === 0 ? (
@@ -1585,6 +1800,96 @@ function ReportsView() {
               ))
             )}
           </div>
+        </div>
+      </div>
+
+      {/* ── Active Sessions Section ── */}
+      <div className="panel mb-4">
+        <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span className="panel-title">ACTIVE_SESSIONS_AUDIT</span>
+          <span className="panel-meta">{sessions.length} sessions recorded</span>
+        </div>
+        <div style={{ maxHeight: '320px', overflowY: 'auto' }}>
+          {sessions.length === 0 ? (
+            <div className="empty-state" style={{ padding: 'var(--sp-6)' }}><p>No session data recorded in this cycle.</p></div>
+          ) : (
+            <table className="data-table" style={{ fontSize: '0.68rem' }}>
+              <thead>
+                <tr>
+                  <th>APPLICATION</th>
+                  <th>DIR</th>
+                  <th>SOURCE (PEER / HOST)</th>
+                  <th>DESTINATION</th>
+                  <th>PACKETS (TX / RX)</th>
+                  <th>FLOWS</th>
+                  <th>RISK</th>
+                  <th>STAGE</th>
+                  <th>LAST SEEN</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sessions.map(s => (
+                  <tr key={s.session_key}>
+                    <td><AppBadge name={s.app_name || s.process_name} processName={s.process_name}/></td>
+                    <td><DirBadge dir={s.direction}/></td>
+                    <td>
+                      <code>{s.src_ip}</code> <IdentityBadge type={s.src_identity}/>
+                    </td>
+                    <td>
+                      <code>{s.dst_ip}</code> <IdentityBadge type={s.dst_identity}/>
+                    </td>
+                    <td>
+                      <PacketStat fwdPkts={s.tot_fwd_pkts} bwdPkts={s.tot_bwd_pkts}/>
+                    </td>
+                    <td>{s.flow_count}</td>
+                    <td style={{ color: (s.latest_risk_score || 0) > 0.5 ? 'var(--severity-critical)' : 'var(--text-muted)', fontWeight: 600 }}>
+                      {formatProb(s.latest_risk_score || 0)}
+                    </td>
+                    <td><span className={`stage-badge ${stageClass(s.latest_stage)}`}>{s.latest_stage || 'Benign'}</span></td>
+                    <td className="mono text-muted">{s.last_seen ? formatTime(s.last_seen) : '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      {/* ── Security Alerts Section ── */}
+      <div className="panel">
+        <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span className="panel-title">INCIDENT_ALERTS_&_PLAYBOOKS</span>
+          <span className="panel-meta">{alerts.length} alerts generated</span>
+        </div>
+        <div style={{ maxHeight: '280px', overflowY: 'auto' }}>
+          {alerts.length === 0 ? (
+            <div className="empty-state" style={{ padding: 'var(--sp-6)' }}><p>No security alerts generated. Baseline is nominal.</p></div>
+          ) : (
+            <table className="data-table" style={{ fontSize: '0.68rem' }}>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>SEVERITY</th>
+                  <th>TARGET</th>
+                  <th>PREDICTED STAGE</th>
+                  <th>CONFIDENCE</th>
+                  <th>RECOMMENDED PLAYBOOK ACTION</th>
+                </tr>
+              </thead>
+              <tbody>
+                {alerts.map(a => (
+                  <tr key={a.id}>
+                    <td className="mono">#{a.id}</td>
+                    <td><span className={`severity-badge ${(a.severity || 'medium').toLowerCase()}`}>{(a.severity || 'medium').toUpperCase()}</span></td>
+                    <td><code style={{ fontSize: '0.62rem' }}>{a.session_key}</code></td>
+                    <td><span className={`stage-badge ${stageClass(a.predicted_stage)}`}>{a.predicted_stage}</span></td>
+                    <td className="mono">{formatProb(a.infiltration_prob || 0)}</td>
+                    <td style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>{a.recommended_action}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
     </>

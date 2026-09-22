@@ -100,7 +100,7 @@ if ($Mode -in @("simulator", "sim")) {
             "-NoExit"
             "-ExecutionPolicy", "Bypass"
             "-Command"
-            "Set-Location '$ROOT'; & '$PYTHON' capture\live_capture.py --interface '$ifaceName' --api http://localhost:8000 --fallback-simulator"
+            "Set-Location '$ROOT'; & '$PYTHON' capture\live_capture.py --interface '$ifaceName' --api http://localhost:8000"
         )
         Write-Host "Live capture started with Administrator privileges." -ForegroundColor Green
     } else {
@@ -111,16 +111,16 @@ if ($Mode -in @("simulator", "sim")) {
                 "-NoExit"
                 "-ExecutionPolicy", "Bypass"
                 "-Command"
-                "Set-Location '$ROOT'; & '$PYTHON' capture\live_capture.py --interface '$ifaceName' --api http://localhost:8000 --fallback-simulator"
+                "Set-Location '$ROOT'; & '$PYTHON' capture\live_capture.py --interface '$ifaceName' --api http://localhost:8000"
             )
             Write-Host "Live capture window opened as Administrator." -ForegroundColor Green
         } catch {
-            Write-Warning "UAC elevation was declined. Falling back to Traffic Simulator..."
+            Write-Warning "UAC elevation was declined. Running live capture in current user privileges..."
             Start-Process powershell -ArgumentList @(
                 "-NoExit"
                 "-ExecutionPolicy", "Bypass"
                 "-Command"
-                "Set-Location '$ROOT'; & '$PYTHON' demo\traffic_simulator.py --api http://localhost:8000 --sessions 4 --speed 1"
+                "Set-Location '$ROOT'; & '$PYTHON' capture\live_capture.py --interface '$ifaceName' --api http://localhost:8000"
             )
         }
     }
