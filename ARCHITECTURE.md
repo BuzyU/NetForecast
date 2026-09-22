@@ -256,6 +256,86 @@ Every alert is accompanied by feature attribution to enable immediate operationa
 
 ---
 
+## 9. Network Identity & Process Attribution Engine
+
+To bridge the gap between abstract network flow telemetry and actionable endpoint response, NetForecast features an integrated **Process & Network Identity Attribution Engine**:
+
+```mermaid
+flowchart LR
+    PKT["Live Packet 5-Tuple<br/>(Src IP, Src Port, Dst IP, Dst Port, Proto)"] --> PR["Process Resolver<br/>(process_resolver.py)"]
+    PR --> OS["OS Extended TCP/UDP Table<br/>(GetExtendedTcpTable / netstat / psutil)"]
+    OS --> PID["PID & Process Metadata<br/>(exe_name, cmdline, user)"]
+    PKT --> NI["Network Identity Engine<br/>(network_identity.py)"]
+    NI --> SUB["Subnet Classification<br/>(RFC1918 / Loopback / Bogon / Public)"]
+    NI --> DNS["Reverse DNS & SNI Resolver<br/>(PTR Lookups, In-Flight Cache)"]
+    PID & SUB & DNS --> BADGE["Enriched Session Metadata<br/>[Chrome] [Antigravity] [Python] [Nmap]"]
+```
+
+1. **Process Attribution (`process_resolver.py`):**
+   - Continuously monitors active local sockets using OS socket APIs (`GetExtendedTcpTable` on Windows via `psutil`/`ctypes`).
+   - Correlates incoming/outgoing 5-tuples to local Process IDs (`PID`), process names (e.g. `chrome.exe`, `cursor.exe`, `python.exe`, `nmap.exe`), and executable paths.
+   - Decorates sessions with recognizable application badges, enabling SOC analysts to instantly distinguish legitimate browser activity from stealthy background tools.
+
+2. **Network Identity (`network_identity.py`):**
+   - Classifies every IP address into topological scopes: `Loopback`, `Private (RFC1918)`, `Link-Local`, `Carrier-Grade NAT`, `Bogon / Reserved`, or `Public Internet`.
+   - Maintains an in-memory, thread-safe DNS/SNI cache for reverse hostname resolution, minimizing latency during high-speed live capture.
+
+---
+
+## 10. Cycle Lifecycle & State Persistence Architecture
+
+In continuous operational monitoring, system hot-reloads, configuration edits, or analyst window switching must **never** cause loss of active telemetry. NetForecast implements a persistent **Cycle Architecture**:
+
+- **Continuous Persistence:** Active sessions, flow records, and alerts are stored in SQLite (`backend/data/netforecast.db`) and queried via async SQLAlchemy sessions.
+- **Zero Startup Wipe:** The application lifespan handler preserves existing sessions across server restarts, file edits, and browser tab switches.
+- **Explicit Cycle Archiving (`/cycle/reset`):** A new monitoring cycle begins **only** when the user explicitly clicks `[NEW_CYCLE]` in the UI or invokes the cycle management API:
+  1. Active tables (`SessionDB`, `FlowRecordDB`, `AlertDB`) are atomically exported into an immutable JSON archive (`backend/data/archives/cycle_<timestamp>.json`).
+  2. Active tables are flushed clean for the new operational cycle.
+  3. Historical cycles remain fully accessible and auditable via `/cycle/archives`.
+
+---
+
+## 11. Traffic Source Mode Gatekeeping
+
+To prevent contaminated training data or false alarms, NetForecast enforces strict **Source Provenance Gatekeeping**:
+
+```
+                 Incoming Telemetry Flow (/ingest)
+                                │
+                   ┌────────────┴────────────┐
+                   ▼                         ▼
+          source == "live"         source == "simulated"
+                   │                         │
+                   │               ┌─────────┴─────────┐
+                   │               ▼                   ▼
+                   │         System Mode:         System Mode:
+                   │           "live"             "simulated"
+                   │               │                   │
+                   ▼               ▼                   ▼
+             [ ACCEPT 200 ]  [ REJECT 403 ]      [ ACCEPT 200 ]
+             Processed by    "Simulation not     Processed for
+             World Model      allowed in Live"     Demo / Lab
+```
+
+- **`🟢 LIVE ONLY` Mode (Default):** Strictly accepts genuine packets captured from the network interface via `capture/live_capture.py`. Any synthetic flow tagged `source: "simulated"` is rejected with **`HTTP 403 Forbidden`**.
+- **`🟠 SIMULATED` Mode:** Engaged via **Settings** to enable `demo/traffic_simulator.py` to inject multi-stage attack scenarios without requiring dedicated lab VMs.
+
+---
+
+## 12. Themed Forensic Reporting & Dossier Generation Subsystem
+
+NetForecast includes a dedicated forensic reporting engine that formats all security outputs in the system's retro-futuristic SOC palette (Warm Cream `#fbf8f2` and Burnt Orange `#e67e22`):
+
+- **In-Browser Interactive Dossiers:**
+  - `GET /reports/view/html`: Printable forensic incident report containing session inventory, risk distributions, and attack kill-chain timeline.
+  - `GET /explain/view/html`: Deep feature attribution dossier featuring horizontal SHAP/Gradient bar charts, session identity, and full 22-feature ranking tables.
+  - `GET /forecast/view/html`: Predictive forecast dossier displaying lookahead trajectories, Monte Carlo confidence intervals, and trend projections.
+- **SIEM & Data Lake Exports:**
+  - Standardized `CSV` and `JSON` export endpoints across `/reports`, `/explain`, and `/forecast` for direct ingestion into Splunk, Elastic, or Sentinel.
+
+---
+
 <div align="center">
   <sub>NetForecast Architecture Specification • Smart India Hackathon 2026 • Problem Statement ID 26153</sub>
 </div>
+

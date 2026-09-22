@@ -17,7 +17,7 @@
   <em>Multi-head recurrent World Model • Autoregressive Monte Carlo rollouts • SHAP & Gradient explainability • Real-time PCAP & live packet ingestion</em>
 </p>
 
-[Quickstart](#-quickstart) • [Architecture](ARCHITECTURE.md) • [Presentation Deck](PRESENTATION.md) • [Benchmarks](#-benchmark-performance-on-cic-ids2017) • [API Reference](#-api-endpoints) • [Lab Setup](LAB_SETUP.md)
+[Quickstart](#-quickstart) • [Architecture](ARCHITECTURE.md) • [Simulation Playbook](SIMULATION.md) • [Presentation Deck](PRESENTATION.md) • [Benchmarks](#-benchmark-performance-on-cic-ids2017) • [API Reference](#-api-endpoints) • [Lab Setup](LAB_SETUP.md)
 
 </div>
 
@@ -34,6 +34,9 @@ Traditional Network Intrusion Detection Systems (NIDS) are **reactive**: they fl
 4. **Quantifies Uncertainty:** Uses stochastic **Monte Carlo Rollouts** to deliver confidence intervals to security operators.
 5. **Prevents Alert Fatigue:** Computes a dynamic **Adaptive EMA Threshold** ($\bar{p} + 2\sigma$) tuned to live background traffic.
 6. **Explains Every Decision:** Dual **SHAP** (Shapley Additive exPlanations) and **Gradient $\times$ Input** attributions pinpoint the exact telemetry features driving risk.
+7. **Resolves Process & Network Identity:** Correlates live socket 5-tuples to local PIDs and executable names (`chrome.exe`, `python.exe`, `nmap.exe`) with topological IP classification.
+8. **Preserves Continuous Telemetry Cycles:** Non-destructive state persistence across server hot-reloads and window switches with on-demand cycle archiving.
+9. **Generates Themed Forensic Dossiers:** 1-click in-browser printable incident reports and SIEM exports (HTML, CSV, JSON) formatted in NetForecast's SOC cream & burnt orange design.
 
 ---
 
@@ -240,20 +243,34 @@ python pipeline_fixed.py \
 
 ## 🔌 API Endpoints
 
-| Method | Endpoint | Description | Rate Limit |
-|:---:|---|---|:---:|
-| `GET` | `/health` | System status, device (CPU/CUDA), active features count | 120/min |
-| `POST` | `/predict` | Single-step state transition & stage prediction from $6 \times 22$ window | 120/min |
-| `POST` | `/forecast` | $k$-step Monte Carlo rollout with uncertainty intervals & EMA | 120/min |
-| `POST` | `/explain` | Feature attribution (`method: "shap"` or `method: "gradient"`) | 120/min |
-| `POST` | `/ingest` | Ingest single flow telemetry record | 120/min |
-| `POST` | `/ingest/csv` | Bulk upload flow log CSV | 60/min |
-| `POST` | `/ingest/pcap` | Upload raw `.pcap` file for Scapy flow reconstruction | 30/min |
-| `GET` | `/alerts` | Query active & historical alerts with triage status | 120/min |
-| `POST` | `/alerts/{id}/acknowledge` | Acknowledge alert with operator notes | 120/min |
-| `GET` | `/reports/export/csv` | Export forensic CSV report for sessions and alerts | 60/min |
-| `GET` | `/reports/export/json` | Export full structured JSON telemetry & kill-chain report | 60/min |
-| `WS` | `/ws/live` | WebSocket real-time flow telemetry stream | — |
+| Category | Method | Endpoint | Description | Rate Limit |
+|:---:|:---:|---|---|:---:|
+| **Health & Info** | `GET` | `/health` | System status, device (CPU/CUDA), active features count | 120/min |
+| **Forecasting** | `POST` | `/predict` | Single-step state transition & stage prediction from $6 \times 22$ window | 120/min |
+| | `POST` | `/forecast` | $k$-step Monte Carlo rollout with uncertainty intervals & EMA | 120/min |
+| | `GET` | `/forecast/view/html` | Printable in-browser HTML forecast trajectory dossier | 60/min |
+| | `GET` | `/forecast/export/html` | Download themed HTML forecast dossier | 60/min |
+| | `GET` | `/forecast/export/csv` | Download forecast steps as CSV | 60/min |
+| | `GET` | `/forecast/export/json` | Download forecast steps as JSON | 60/min |
+| **Explainability** | `POST` | `/explain` | Feature attribution (`method: "shap"` or `method: "gradient"`) | 120/min |
+| | `GET` | `/explain/view/html` | Printable in-browser HTML attribution dossier (SHAP/Gradient) | 60/min |
+| | `GET` | `/explain/export/html` | Download themed HTML explanation dossier | 60/min |
+| | `GET` | `/explain/export/csv` | Download feature attributions as CSV | 60/min |
+| | `GET` | `/explain/export/json` | Download feature attributions as JSON | 60/min |
+| **Forensic Reports** | `GET` | `/reports/view/html` | Printable in-browser HTML incident forensic dossier | 60/min |
+| | `GET` | `/reports/export/html` | Download themed HTML forensic report | 60/min |
+| | `GET` | `/reports/export/csv` | Export forensic CSV report for sessions and alerts | 60/min |
+| | `GET` | `/reports/export/json` | Export full structured JSON telemetry & kill-chain report | 60/min |
+| **Ingestion** | `POST` | `/ingest` | Ingest single flow telemetry record (gated by mode) | 120/min |
+| | `POST` | `/ingest/csv` | Bulk upload flow log CSV | 60/min |
+| | `POST` | `/ingest/pcap` | Upload raw `.pcap` file for Scapy flow reconstruction | 30/min |
+| **System & Cycle** | `GET/POST`| `/system/mode` | Query or toggle between `live` and `simulated` modes | 120/min |
+| | `POST` | `/system/purge-simulated` | Delete all simulated flows, sessions, and alerts | 60/min |
+| | `POST` | `/cycle/reset` | Archive current monitoring cycle and start a fresh cycle | 60/min |
+| | `GET` | `/cycle/archives` | List historical cycle archives | 120/min |
+| **Alerts & WS** | `GET` | `/alerts` | Query active & historical alerts with triage status | 120/min |
+| | `POST` | `/alerts/{id}/acknowledge` | Acknowledge alert with operator notes | 120/min |
+| | `WS` | `/ws/live` | WebSocket real-time flow telemetry stream | — |
 
 ---
 
@@ -267,16 +284,21 @@ Network_Attack_Detection/
 │   │   ├── database.py              # SQLite + async SQLAlchemy session models
 │   │   ├── inference.py             # World Model forward pass, MC rollout & SHAP
 │   │   ├── ingestion.py             # Sliding window buffer & Adaptive EMA threshold
+│   │   ├── network_identity.py      # IP subnetting, loopback/bogon & reverse DNS cache
+│   │   ├── process_resolver.py      # Windows socket-to-PID & executable correlation
 │   │   ├── main.py                  # App factory, SlowAPI rate limiter & CORS
 │   │   ├── model_loader.py          # Dynamic artifact loader (hidden_size, scaler)
 │   │   ├── schemas.py               # Pydantic request/response validation schemas
 │   │   └── routes/                  # Modular endpoint routers
 │   │       ├── alerts.py            # Alert triage & acknowledge
-│   │       ├── forecast.py          # Prediction & MC rollout routes
-│   │       ├── ingest.py            # Single & batch flow ingestion
+│   │       ├── cycle.py             # Cycle reset, persistence & archive browser
+│   │       ├── explain.py           # SHAP / Gradient attribution & HTML/CSV/JSON dossiers
+│   │       ├── forecast.py          # Prediction, MC rollout & HTML/CSV/JSON dossiers
+│   │       ├── ingest.py            # Single & batch flow ingestion (mode-gated)
 │   │       ├── pcap.py              # Scapy PcapReader flow reconstruction
-│   │       ├── reports.py           # Forensic CSV/JSON report exports
-│   │       └── websocket.py         # Real-time WebSocket event broadcaster
+│   │       ├── reports.py           # Forensic HTML dossiers & CSV/JSON exports
+│   │       ├── system.py            # Mode switcher (live vs simulated) & purge
+│   │       └── ws.py                # Real-time WebSocket event broadcaster
 │   ├── artifacts/                   # Serialized production models & metrics
 │   │   ├── benchmark_comparison.csv # Baseline comparison table
 │   │   ├── config.json              # Model hyperparameters & provenance
