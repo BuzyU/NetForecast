@@ -19,7 +19,23 @@ updates:
       - "github-actions"
     open-pull-requests-limit: 10
 
-  # 2. Python Backend Dependencies (pip)
+  # 2. Root Python Dependencies (pyproject.toml)
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Asia/Kolkata"
+    commit-message:
+      prefix: "build(deps-root-py)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "python"
+    open-pull-requests-limit: 10
+
+  # 3. Backend Python Dependencies (requirements.txt)
   - package-ecosystem: "pip"
     directory: "/backend"
     schedule:
@@ -36,7 +52,23 @@ updates:
       - "python"
     open-pull-requests-limit: 10
 
-  # 3. Frontend Dependencies (npm)
+  # 4. Root NPM Workspaces (package.json)
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Asia/Kolkata"
+    commit-message:
+      prefix: "build(deps-root-npm)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "npm"
+    open-pull-requests-limit: 10
+
+  # 5. Frontend Dependencies (npm)
   - package-ecosystem: "npm"
     directory: "/frontend"
     schedule:
