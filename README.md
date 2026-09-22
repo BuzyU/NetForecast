@@ -1,8 +1,9 @@
 <div align="center">
 
-# 🛡️ NetForecast
-### Autonomous Network Attack Forecasting & World Model Telemetry Engine
-**SIH 2026 — Problem Statement ID 26153 (National Technical Research Organisation)**
+# 🦅 Project Garud
+### Autonomous Network Attack Forecasting & Deep World Model Telemetry Engine
+**SIH 2026 — Problem Statement ID 26153 (National Technical Research Organisation)**  
+**Team: Code 4 Change • Repository: [Team-Code-4-Chnage/Project-Garud](https://github.com/Team-Code-4-Chnage/Project-Garud)**
 
 [![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.12-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.x-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white)](https://pytorch.org)
@@ -27,7 +28,7 @@
 
 Traditional Network Intrusion Detection Systems (NIDS) are **reactive**: they flag malicious behavior only after a malicious signature or anomalous payload has already crossed the wire. In Critical Information Infrastructure (CII) and high-assurance enterprise perimeters, this detection is often **too late** — data has been staged, privilege escalated, and persistence established.
 
-**NetForecast** introduces a **World Model** for network defense:
+**Project Garud** (powered by the **NetForecast** deep recurrent telemetry engine) introduces a **World Model** for network defense:
 1. **Learns Temporal State Dynamics:** Embeds sliding windows of network flow telemetry into latent space.
 2. **Forecasts Future Network States:** Predicts future flow feature vectors $\hat{s}_{t+1}, \dots, \hat{s}_{t+k}$ before packets arrive.
 3. **Anticipates Attack Progression:** Maps trajectory to the 6-stage **MITRE ATT&CK** kill chain.

@@ -1,12 +1,12 @@
-# 🎯 NetForecast Attack Simulation & Detection Guide
+# 🎯 Project Garud — Attack Simulation & Detection Guide
 ### Step-by-Step Practical Playbook for Validating Deep World Model Telemetry
-**Smart India Hackathon 2026 — Problem Statement ID 26153 (NTRO)**
+**Smart India Hackathon 2026 — Problem Statement ID 26153 (NTRO) • Team Code 4 Change**
 
 ---
 
 ## 📖 Overview
 
-This document provides a comprehensive, step-by-step guide to simulating **every attack category** that **NetForecast** is trained to forecast and detect. For each attack, this guide explains:
+This document provides a comprehensive, step-by-step guide to simulating **every attack category** that **Project Garud** is trained to forecast and detect. For each attack, this guide explains:
 1. **The Attack Objective & MITRE ATT&CK Mapping**
 2. **Exact Execution Commands** (using standard industry penetration testing tools: `nmap`, `hydra`, `curl`, `hping3`, `scapy`, and Python scripts, as well as the built-in synthetic generator)
 3. **Why this specific command is used** (underlying protocol mechanics, packet flags, and timing)

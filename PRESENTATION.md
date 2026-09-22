@@ -1,5 +1,6 @@
-# NetForecast: AI-Based Cyber Attack Forecasting
-## SIH 2026 Presentation Deck — Problem Statement ID 26153
+# Project Garud: Autonomous Cyber Attack Forecasting
+## SIH 2026 Presentation Deck — Problem Statement ID 26153 (NTRO)
+**Team:** Code 4 Change • **Repository:** [Team-Code-4-Chnage/Project-Garud](https://github.com/Team-Code-4-Chnage/Project-Garud)  
 **Category:** Artificial Intelligence / Cybersecurity  
 **Focus:** Anticipatory Cyber Defense for Critical Information Infrastructure (CII)
 

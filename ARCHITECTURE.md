@@ -1,8 +1,8 @@
 <div align="center">
 
-# 🏛️ NetForecast System Architecture
+# 🏛️ Project Garud — System Architecture
 ### Deep World Model Telemetry Engine for Predictive Cyber Defense
-**Smart India Hackathon 2026 — Problem Statement ID 26153 (NTRO)**
+**Smart India Hackathon 2026 — Problem Statement ID 26153 (NTRO) • Team Code 4 Change**
 
 [![Architecture](https://img.shields.io/badge/Architecture-World%20Model%20LSTM-blue?style=for-the-badge)](ARCHITECTURE.md)
 [![Features](https://img.shields.io/badge/Features-22%20Temporal%20Flows-green?style=for-the-badge)](ARCHITECTURE.md#3-telemetry-feature-space--22-vector-representation)
@@ -17,7 +17,7 @@
 
 Traditional intrusion detection operates on static point classifications: given an observed flow $x_t$, predict $y_t \in \{0, 1\}$. This formulation discards historical trajectory, lacks predictive agency, and cannot forecast what an adversary will do next.
 
-**NetForecast** adopts the **World Model** formulation from reinforcement learning and sequential decision theory:
+**Project Garud** (utilizing the **NetForecast** deep recurrent telemetry engine) adopts the **World Model** formulation from reinforcement learning and sequential decision theory:
 $$\mathcal{M} = \langle \mathcal{S}, \mathcal{T}, \Omega, \mathcal{R} \rangle$$
 
 Where:

@@ -408,8 +408,8 @@ export default function App() {
       {/* ── Sidebar ── */}
       <nav className="sidebar">
         <div className="sidebar-brand">
-          <h1>NetForecast</h1>
-          <span>MITRE ATT&CK Forecasting Engine</span>
+          <h1>Project Garud</h1>
+          <span>NetForecast World Model Engine</span>
         </div>
 
         <div className="nav-section">
@@ -547,7 +547,7 @@ export default function App() {
 
       {/* ── Footer ── */}
       <footer className="footer">
-        <span>NetForecast v1.0 // SIH 2026 PS26153</span>
+        <span>Project Garud v1.0 // SIH 2026 PS26153 (Team Code 4 Change)</span>
         <span>LSTM World Model // {health?.features_count || 22} Features // Window={health?.stages?.length || 6}</span>
       </footer>
     </div>
