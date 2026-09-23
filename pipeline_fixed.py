@@ -198,6 +198,65 @@ class IsolationForestBaseline:
         return (avg_lengths < thresh).astype(int)
 
 
+# (mean, std) per feature per stage — realistic CIC-IDS magnitudes.
+# Shared by generate_synthetic_flows() (full cold-start fallback dataset) and
+# augment_rare_stages() (targeted oversampling of stages CIC-IDS2017 barely
+# has real examples of). These profiles match traffic_simulator.py's
+# STAGE_PROFILES so the scaler stays consistent across offline training,
+# live capture, and the demo simulator.
+STAGE_PROFILES_MEAN = {
+    "Benign": [50000, 10, 8, 200, 180, 5000, 20, 50000, 30000, 60000, 70000, 1, 5, 1, 0, 2, 0, 1.0, 400, 5, 8192, 0],
+    "Reconnaissance": [5000, 50, 2, 60, 20, 15000, 120, 3000, 2000, 4000, 8000, 8, 2, 0, 2, 1, 0, 0.2, 80, 3, 1024, 1],
+    "Initial Access": [30000, 15, 10, 150, 120, 8000, 40, 20000, 15000, 25000, 30000, 2, 8, 2, 1, 6, 0, 0.8, 300, 4, 8192, 3],
+    "Lateral Movement": [40000, 20, 18, 180, 200, 10000, 35, 30000, 20000, 35000, 40000, 1, 10, 1, 0, 4, 0, 2.5, 350, 6, 16384, 1],
+    "C2": [80000, 8, 6, 100, 90, 3000, 15, 90000, 5000, 95000, 95000, 0, 12, 0, 0, 2, 0, 1.1, 200, 2, 8192, 0],
+    "Exfiltration": [120000, 5, 30, 200, 1200, 80000, 25, 40000, 30000, 45000, 42000, 0, 15, 2, 0, 3, 0, 0.3, 1100, 2, 65535, 3],
+}
+STAGE_PROFILES_STD = {
+    "Benign":         [30000, 8,  6,  150, 120, 4000, 15, 40000, 25000, 50000, 55000, 0.5, 3,  0.5, 0.2, 1.5, 0.1, 0.3, 200, 3, 4000, 0.2],
+    "Reconnaissance": [3000,  30, 1,  40,  15,  8000, 60, 2000,  1500,  3000,  5000,  4,   1,  0.2, 1,   0.5, 0.1, 0.1, 40,  2, 500,  0.5],
+    "Initial Access": [10000, 8,  6,  80,  60,  4000, 20, 10000, 8000,  12000, 15000, 1,   4,  1,   0.5, 3,   0.1, 0.3, 150, 2, 4000, 1.5],
+    "Lateral Movement":[15000, 10, 8,  80,  80,  5000, 15, 15000, 10000, 18000, 20000, 0.5, 5,  0.5, 0.2, 2,   0.1, 0.5, 150, 3, 8000, 0.5],
+    "C2":             [20000, 4,  3,  50,  45,  1500, 8,  10000, 2000,  12000, 12000, 0.2, 5,  0.1, 0.1, 1,   0.1, 0.2, 80,  1, 4000, 0.2],
+    "Exfiltration":   [40000, 3,  15, 100, 400, 30000, 10, 20000, 15000, 22000, 20000, 0.2, 6,  1,   0.2, 1.5, 0.1, 0.1, 400, 1, 10000, 1.5],
+}
+
+
+def augment_rare_stages(stages, n_sessions_per_stage=300, session_len=12, start_sid=-1):
+    """
+    Generate synthetic TRAIN-ONLY sessions for stages that real_flows.csv has
+    too few (or zero) real examples of to learn from (Lateral Movement,
+    Exfiltration). Sampled from the same calibrated per-stage feature profiles
+    used by generate_synthetic_flows()/traffic_simulator.py — real magnitude
+    scale, not learned from real Lateral Movement/Exfiltration traffic because
+    there isn't enough of it to learn a profile from in the first place.
+
+    Caller MUST only append this to the train split, never test — mixing
+    synthetic rows into the held-out set would make evaluation meaningless.
+    Session IDs are negative so they can never collide with real (>=0) ones.
+    """
+    rows = []
+    sid = start_sid
+    for stage in stages:
+        means_base = np.array(STAGE_PROFILES_MEAN[stage], dtype=np.float64)
+        stds_base = np.array(STAGE_PROFILES_STD[stage], dtype=np.float64)
+        for _ in range(n_sessions_per_stage):
+            t0 = pd.Timestamp("2026-01-01") + pd.Timedelta(minutes=abs(sid) * 5)
+            for t in range(session_len):
+                base = np.maximum(0, np.random.normal(means_base, stds_base))
+                row = dict(zip(FLOW_FEATURES, base))
+                row["session_id"] = sid
+                row["timestamp"] = t0 + pd.Timedelta(seconds=t * 2)
+                row["stage_label"] = stage
+                row["is_malicious"] = 1
+                rows.append(row)
+            sid -= 1
+    print(f"  Synthetic augmentation: +{len(rows)} rows across "
+          f"{len(stages)} stage(s) x {n_sessions_per_stage} sessions "
+          f"(train-only, session_len={session_len})", flush=True)
+    return pd.DataFrame(rows)
+
+
 def generate_synthetic_flows(n_sessions=400, session_len=30):
     """
     Generate synthetic flow sessions with REALISTIC CIC-IDS-scale feature magnitudes.
@@ -209,23 +268,8 @@ def generate_synthetic_flows(n_sessions=400, session_len=30):
     These profiles match traffic_simulator.py's STAGE_PROFILES so that the
     scaler trained here will correctly normalise both simulated and live-captured flows.
     """
-    # (mean, std) per feature per stage — realistic CIC-IDS magnitudes
-    PROFILES = {
-        "Benign": [50000, 10, 8, 200, 180, 5000, 20, 50000, 30000, 60000, 70000, 1, 5, 1, 0, 2, 0, 1.0, 400, 5, 8192, 0],
-        "Reconnaissance": [5000, 50, 2, 60, 20, 15000, 120, 3000, 2000, 4000, 8000, 8, 2, 0, 2, 1, 0, 0.2, 80, 3, 1024, 1],
-        "Initial Access": [30000, 15, 10, 150, 120, 8000, 40, 20000, 15000, 25000, 30000, 2, 8, 2, 1, 6, 0, 0.8, 300, 4, 8192, 3],
-        "Lateral Movement": [40000, 20, 18, 180, 200, 10000, 35, 30000, 20000, 35000, 40000, 1, 10, 1, 0, 4, 0, 2.5, 350, 6, 16384, 1],
-        "C2": [80000, 8, 6, 100, 90, 3000, 15, 90000, 5000, 95000, 95000, 0, 12, 0, 0, 2, 0, 1.1, 200, 2, 8192, 0],
-        "Exfiltration": [120000, 5, 30, 200, 1200, 80000, 25, 40000, 30000, 45000, 42000, 0, 15, 2, 0, 3, 0, 0.3, 1100, 2, 65535, 3],
-    }
-    STDS = {
-        "Benign":         [30000, 8,  6,  150, 120, 4000, 15, 40000, 25000, 50000, 55000, 0.5, 3,  0.5, 0.2, 1.5, 0.1, 0.3, 200, 3, 4000, 0.2],
-        "Reconnaissance": [3000,  30, 1,  40,  15,  8000, 60, 2000,  1500,  3000,  5000,  4,   1,  0.2, 1,   0.5, 0.1, 0.1, 40,  2, 500,  0.5],
-        "Initial Access": [10000, 8,  6,  80,  60,  4000, 20, 10000, 8000,  12000, 15000, 1,   4,  1,   0.5, 3,   0.1, 0.3, 150, 2, 4000, 1.5],
-        "Lateral Movement":[15000, 10, 8,  80,  80,  5000, 15, 15000, 10000, 18000, 20000, 0.5, 5,  0.5, 0.2, 2,   0.1, 0.5, 150, 3, 8000, 0.5],
-        "C2":             [20000, 4,  3,  50,  45,  1500, 8,  10000, 2000,  12000, 12000, 0.2, 5,  0.1, 0.1, 1,   0.1, 0.2, 80,  1, 4000, 0.2],
-        "Exfiltration":   [40000, 3,  15, 100, 400, 30000, 10, 20000, 15000, 22000, 20000, 0.2, 6,  1,   0.2, 1.5, 0.1, 0.1, 400, 1, 10000, 1.5],
-    }
+    PROFILES = STAGE_PROFILES_MEAN
+    STDS = STAGE_PROFILES_STD
     rows = []
     for sid in range(n_sessions):
         is_attack_session = random.random() < 0.4
@@ -378,6 +422,16 @@ def main():
     ap.add_argument("--dropout", type=float, default=0.25, help="Dropout probability")
     ap.add_argument("--lr", type=float, default=1e-3, help="Initial learning rate")
     ap.add_argument("--weight-decay", type=float, default=1e-4, help="AdamW weight decay")
+    ap.add_argument("--augment-stages", default="Lateral Movement,Exfiltration",
+                     help="Comma-separated stage names to oversample with synthetic train-only "
+                          "sessions (real_flows.csv has ~36 and ~2 real examples of these — "
+                          "not enough to learn from). Empty string disables augmentation.")
+    ap.add_argument("--augment-sessions-per-stage", type=int, default=300,
+                     help="Synthetic sessions to generate per augmented stage")
+    ap.add_argument("--class-weight-max", type=float, default=15.0,
+                     help="Upper clip for inverse-frequency class weights (was 50.0 — that "
+                          "aggressive a weight was overshooting and collapsing Initial Access "
+                          "precision to ~6%%)")
     args = ap.parse_args()
 
     out_dir = args.out
@@ -404,6 +458,15 @@ def main():
     train_mask = df["session_id"].isin(train_sids)
     train_df = df[train_mask].copy()
     test_df  = df[~train_mask].copy()
+
+    # ── Synthetic oversampling of stages real_flows.csv can't teach from ──
+    # Applied to train_df only, strictly AFTER the session split, so the held-out
+    # test set stays 100% real and evaluation numbers stay honest.
+    augment_stages = [s.strip() for s in args.augment_stages.split(",") if s.strip()]
+    if augment_stages:
+        synth_df = augment_rare_stages(augment_stages, n_sessions_per_stage=args.augment_sessions_per_stage)
+        train_df = pd.concat([train_df, synth_df], ignore_index=True)
+        print(f"Train shape after augmentation: {train_df.shape}", flush=True)
 
     scaler = StandardScaler()
     train_df[FLOW_FEATURES] = scaler.fit_transform(train_df[FLOW_FEATURES])   # fit on train only
@@ -443,7 +506,7 @@ def main():
     stage_counts = np.bincount(ys_train, minlength=len(STAGES))
     total_samples = len(ys_train)
     raw_weights = total_samples / (len(STAGES) * np.maximum(stage_counts, 1).astype(np.float32))
-    class_weights = np.clip(raw_weights, 0.2, 50.0)
+    class_weights = np.clip(raw_weights, 0.2, args.class_weight_max)
     stage_weight_t = torch.tensor(class_weights, dtype=torch.float32).to(DEVICE)
     ce_loss = nn.CrossEntropyLoss(weight=stage_weight_t)
 
@@ -587,6 +650,14 @@ def main():
                 "test_rows": int(len(test_df)),
                 "git_commit": git_commit,
                 "leakage_fix": "session-level split, scaler fit on train only",
+                "synthetic_augmentation": {
+                    "stages": augment_stages,
+                    "sessions_per_stage": args.augment_sessions_per_stage if augment_stages else 0,
+                    "note": "train-only synthetic oversampling from calibrated per-stage "
+                            "feature profiles; test set is 100% real CIC-IDS2017 flows, "
+                            "untouched by augmentation",
+                },
+                "class_weight_max": args.class_weight_max,
                 "best_val_f1": best_val_f1,
                 "optimization": "AdamW + CosineAnnealingLR + ClassWeighting",
             }

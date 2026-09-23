@@ -21,18 +21,18 @@ All identified gaps from the initial audit have been resolved. The system now fu
 
 ## 2. Benchmark Comparison Results on Real CIC-IDS2017 Data
 
-The system was evaluated on **320,000 real flows** (249,518 training sequences, 62,478 test sequences across 1,334 sessions) from the official **CIC-IDS2017 dataset** across all 8 capture days.
+The system was evaluated on **320,000 real flows** (253,118 training sequences — including train-only synthetic oversampling of two data-starved stages — and 62,478 100%-real, untouched test sequences, across 1,334 real sessions) from the official **CIC-IDS2017 dataset** across all 8 capture days.
 
-The upgraded **2-layer LSTM World Model (hidden_size=256, dropout=0.25, AdamW + CosineAnnealingLR + Class-Weighted Loss)** was evaluated against supervised and unsupervised baselines in [benchmark_comparison.csv](file:///c:/Users/umerz/OneDrive/Desktop/Network_Attack_Detection/backend/artifacts/benchmark_comparison.csv):
+The upgraded **2-layer LSTM World Model (hidden_size=256, dropout=0.25, AdamW + CosineAnnealingLR + Class-Weighted Loss, class-weight clip 15x)** was evaluated against supervised and unsupervised baselines in `backend/artifacts/benchmark_comparison.csv`:
 
 | Model | F1-Score | Precision | Recall | False Positive Rate (FPR) |
 |---|---|---|---|---|
-| **Logistic Regression (baseline)** | 0.5067 | 0.5516 | 0.4686 | 0.1141 (11.41%) |
-| **Isolation Forest (baseline)** | 0.3206 | 0.2887 | 0.3604 | 0.2660 (26.60%) |
-| **LSTM World Model (MAX Config)** | **0.8446** | **0.8184** | **0.8727** | **0.0580 (5.80%)** |
+| **Logistic Regression (baseline)** | 0.505 | 0.692 | 0.398 | 0.0531 (5.31%) |
+| **Isolation Forest (baseline)** | 0.327 | 0.291 | 0.372 | 0.2719 (27.19%) |
+| **LSTM World Model (MAX Config)** | **0.853** | **0.841** | **0.866** | **0.0490 (4.90%)** |
 
 > [!NOTE]
-> On the real-world dataset, the LSTM World Model outperforms the baselines by a huge margin (**F1 0.8446 vs 0.5067 and 0.3206**), with a **recall of 87.27%** on attacks and an **FPR of only 5.80%** (compared to 26.60% for Isolation Forest). The class-weighted loss and pos-weighting enabled strong detection of rare attack stages (`Lateral Movement`, `Initial Access`, and `Exfiltration`).
+> These are binary malicious-vs-benign numbers. Per-MITRE-stage, capability is uneven: Benign/Reconnaissance/C2 are reliably classified, Initial Access has real recall (61%) but weak precision (13%), and **Lateral Movement/Exfiltration are not detected at all (0% recall)** — CIC-IDS2017 only has ~36 Infiltration and ~11 Heartbleed flows in its entire public release. We tried train-only synthetic oversampling for these two stages (300 sessions/stage from calibrated feature profiles) and confirmed via held-out evaluation that it did **not** transfer to real traffic. See `docs/model_card.md` §6 and §8 for the full per-stage breakdown and root-cause analysis.
 
 ---
 

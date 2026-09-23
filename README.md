@@ -43,19 +43,24 @@ Traditional Network Intrusion Detection Systems (NIDS) are **reactive**: they fl
 
 ## 📊 Benchmark Performance on CIC-IDS2017
 
-Evaluated on **320,000 real-world flows** (249,518 training sequences, 62,478 test sequences across 1,334 sessions) from the Canadian Institute for Cybersecurity **CIC-IDS2017** benchmark across all 8 capture days.
+Evaluated on **320,000 real-world flows** (253,118 training sequences — including train-only
+synthetic oversampling of two data-starved stages, see below — and 62,478 **100% real, untouched**
+test sequences, across 1,334 real sessions) from the Canadian Institute for Cybersecurity
+**CIC-IDS2017** benchmark across all 8 capture days.
 
-| Model Architecture | F1-Score | Precision | Recall (Detection Rate) | False Positive Rate (FPR) | Latency (Inference) |
+| Model Architecture | F1-Score | Precision | Recall (Detection Rate) | False Positive Rate (FPR) | Latency (Inference, CPU) |
 |---|:---:|:---:|:---:|:---:|:---:|
-| **Logistic Regression** *(Linear Baseline)* | 0.5067 | 0.5516 | 0.4686 | 11.41% | < 1 ms |
-| **Isolation Forest** *(Unsupervised Baseline)* | 0.3206 | 0.2887 | 0.3604 | 26.60% | ~ 8 ms |
-| **NetForecast World Model** *(Proposed, MAX Config)* | **0.8446** | **0.8184** | **0.8727** | **5.80%** | **~ 3.2 ms** |
+| **Logistic Regression** *(Linear Baseline)* | 0.505 | 0.692 | 0.398 | 5.31% | < 1 ms |
+| **Isolation Forest** *(Unsupervised Baseline)* | 0.327 | 0.291 | 0.372 | 27.19% | ~ 8 ms |
+| **NetForecast World Model** *(Proposed, MAX Config)* | **0.853** | **0.841** | **0.866** | **4.90%** | **~ 0.7 ms** (measured, single-window forward pass) |
 
 > [!IMPORTANT]
-> **Key Operational Findings:**
-> - **4.5% Higher Attack Recall:** Class-weighted cross-entropy (up to 50x weight on rare stages) and positive-weighted BCE enabled **87.27% recall** across rare multi-stage attacks (`Infiltration`, `Heartbleed`, `Web Attacks`).
-> - **Low False Positive Rate:** FPR is constrained to **5.80%** (vs 26.60% for Isolation Forest), preventing alert fatigue in 24/7 Security Operations Centers (SOC).
+> **Key Operational Findings (binary malicious-vs-benign detection):**
+> - Class-weighted cross-entropy (clipped to 15x, tuned down from an earlier 50x that over-corrected) and positive-weighted BCE (`pos_weight≈3.01`) give **86.6% recall** at the binary detection level with a **4.90% FPR**, avoiding the alert fatigue of the Isolation Forest baseline (27.19% FPR).
 > - **Leakage-Free Validation:** Strict session-level train/test split. The standard scaler is fitted strictly on training sessions — zero test-set information leaks into the normalization parameters.
+>
+> **Per-MITRE-stage capability is uneven — read this before quoting the binary numbers above as "detects all attacks":**
+> Benign/Reconnaissance/C2 are reliably classified (F1 0.75–0.94). Initial Access (web attacks) has real recall (61%) but weak precision (13%) — it over-fires. **Lateral Movement and Exfiltration are not detected at all (0% recall, including at the binary alert level)** — CIC-IDS2017 only has ~36 Infiltration and ~11 Heartbleed flows in its entire public release, which is too little to learn from; we tried train-only synthetic oversampling for these two stages and confirmed via held-out evaluation that it did not transfer to real traffic. Full per-stage numbers and root-cause analysis are in [`docs/model_card.md`](docs/model_card.md#6-evaluation--comparative-benchmark).
 
 ---
 

@@ -39,11 +39,20 @@
     "trained_on": "real_flows.csv",
     "train_sessions": 1067,
     "test_sessions": 267,
-    "train_rows": 255920,
+    "train_rows": 263120,
     "test_rows": 64080,
-    "git_commit": "7796bdf",
+    "git_commit": "23a48d4",
     "leakage_fix": "session-level split, scaler fit on train only",
-    "best_val_f1": 0.8446,
+    "synthetic_augmentation": {
+      "stages": [
+        "Lateral Movement",
+        "Exfiltration"
+      ],
+      "sessions_per_stage": 300,
+      "note": "train-only synthetic oversampling from calibrated per-stage feature profiles; test set is 100% real CIC-IDS2017 flows, untouched by augmentation"
+    },
+    "class_weight_max": 15.0,
+    "best_val_f1": 0.8531,
     "optimization": "AdamW + CosineAnnealingLR + ClassWeighting"
   }
 }

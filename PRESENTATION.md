@@ -59,9 +59,11 @@ NetForecast outperforms both traditional supervised classifiers and unsupervised
 
 | Model | Technique | F1-Score | Precision | Recall | False Positive Rate (FPR) |
 |---|---|---|---|---|---|
-| **Logistic Regression** | Shallow Linear Baseline | 0.963 | 0.958 | 0.969 | 0.043 |
-| **Isolation Forest** | Unsupervised Anomaly Detection | 0.724 | 0.695 | 0.756 | 0.128 |
-| **NetForecast (World Model)** | 2-Layer LSTM + Multi-Head Rollout | **0.998** | **0.997** | **1.000** | **0.003** |
+| **Logistic Regression** | Shallow Linear Baseline | 0.505 | 0.692 | 0.398 | 0.053 |
+| **Isolation Forest** | Unsupervised Anomaly Detection | 0.327 | 0.291 | 0.372 | 0.272 |
+| **NetForecast (World Model)** | 2-Layer LSTM + Multi-Head Rollout | **0.853** | **0.841** | **0.866** | **0.049** |
+
+> Binary malicious-vs-benign detection on held-out real CIC-IDS2017 test sessions (`backend/artifacts/benchmark_comparison.csv`). Per-stage capability is uneven — see `docs/model_card.md` §6 for the honest breakdown (Lateral Movement/Exfiltration are not currently detected due to CIC-IDS2017 data scarcity, ~36 and ~11 real examples in the whole public dataset respectively).
 
 #### Interpretable Decision Support:
 - **SHAP (KernelExplainer)**: Calculates exact Shapley values to identify which of the 22 telemetry features pushed the model toward predicting malicious compromise.

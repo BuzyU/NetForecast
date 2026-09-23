@@ -24,15 +24,15 @@
                           └───────────┬────────────┘
                                       │
                          ┌────────────▼───────────┐
-                         │  2-Layer LSTM (h=128)  │
-                         │  Dropout = 0.2         │
+                         │  2-Layer LSTM (h=256)  │
+                         │  Dropout = 0.25        │
                          └────────────┬───────────┘
-                                      │ Hidden State h_t [B, 128]
+                                      │ Hidden State h_t [B, 256]
               ┌───────────────────────┼───────────────────────┐
               │                       │                       │
       ┌───────▼────────┐      ┌───────▼────────┐      ┌───────▼────────┐
       │ Next State Head│      │Infiltration Log│      │   Stage Head   │
-      │ Linear(128, 22)│      │ Linear(128,64) │      │ Linear(128,64) │
+      │ Linear(256, 22)│      │ Linear(256,64) │      │ Linear(256,64) │
       │                │      │ Linear(64, 32) │      │ Linear(64, 6)  │
       │                │      │ Linear(32, 1)  │      │                │
       └───────┬────────┘      └───────┬────────┘      └───────┬────────┘
@@ -109,24 +109,43 @@ FLOW_FEATURES = [
   - `StandardScaler` fitted on training split only (mean and variance preserved in `artifacts/scaler.pkl`).
   - Strict absence of test-set data leakage.
 - **Handling Class Imbalance:**
-  - Inverse-frequency class weighting applied to the Stage cross-entropy loss function.
-  - Infiltration hazard trained using weighted Binary Cross-Entropy with Logits (`pos_weight = 3.2`).
+  - Inverse-frequency class weighting applied to the Stage cross-entropy loss function, clipped to `[0.2, 15.0]` (an earlier `[0.2, 50.0]` clip over-corrected and collapsed Initial Access precision to ~6%).
+  - Infiltration hazard trained using weighted Binary Cross-Entropy with Logits (`pos_weight = 3.01`).
+  - **Synthetic train-only oversampling** for Lateral Movement and Exfiltration: real_flows.csv (CIC-IDS2017-derived) contains only ~36 Infiltration and ~2 Heartbleed flow rows in 320,000 total — far too few to learn from. 300 synthetic sessions per stage, sampled from calibrated per-stage feature profiles, are mixed into the training split only (`pipeline_fixed.py --augment-stages`); the held-out test set stays 100% real. See §6 and §8 for what this did and did not fix.
 
 ---
 
 ## 6. Evaluation & Comparative Benchmark
 
-Evaluated on held-out test sessions containing full multi-stage attack lifecycles:
+Evaluated on a held-out, session-level test split (267 sessions / 62,478 windowed
+sequences) that never touches training or scaler fitting. All numbers below are
+reproduced directly from `backend/artifacts/benchmark_comparison.csv` and a
+held-out per-stage evaluation script — nothing here is estimated.
 
-| Metric | Random Forest (Flow) | Isolation Forest | NetForecast World Model (LSTM) |
+### Binary detection (malicious vs. benign)
+
+| Metric | Logistic Regression (baseline) | Isolation Forest (baseline) | NetForecast World Model (LSTM) |
 |:---|:---:|:---:|:---:|
 | **Temporal Context** | ❌ (1 flow) | ❌ (1 flow) | ✅ ($W=6$ flow history) |
-| **Forecasting Horizon** | None (reactive) | None (anomaly score) | **1 to 20 steps forward** |
-| **Macro Precision** | 0.912 | 0.742 | **0.954** |
-| **Macro Recall** | 0.887 | 0.810 | **0.941** |
-| **Macro F1-Score** | 0.899 | 0.774 | **0.947** |
-| **Infiltration AUROC** | 0.931 | 0.825 | **0.988** |
-| **Mean Alert Lead Time** | 0s (post-facto) | 0s | **+4.2 flows before Exfil** |
+| **F1-Score** | 0.505 | 0.327 | **0.853** |
+| **Precision** | 0.692 | 0.291 | **0.841** |
+| **Recall** | 0.398 | 0.372 | **0.866** |
+| **False Positive Rate** | 5.31% | 27.19% | **4.90%** |
+
+### Per-MITRE-stage classification (honest breakdown, not just binary)
+
+The stage head's real capability varies sharply by class — this is measured
+directly, not projected, and is why the headline binary F1 above should not be
+read as "detects all 6 stages equally well":
+
+| MITRE Stage | Test support | Precision | Recall | F1 | Status |
+|:---|---:|---:|---:|---:|:---|
+| Benign | 48,074 | 0.967 | 0.894 | 0.929 | Reliable |
+| Reconnaissance | 7,028 | 0.671 | 0.848 | 0.749 | Reliable |
+| C2 | 6,877 | 0.934 | 0.935 | 0.935 | Reliable — strongest class |
+| Initial Access | 491 | 0.133 | 0.607 | 0.219 | Weak — over-fires (false positives), improved 2x from 0.062 after retuning class weights but not solved |
+| Lateral Movement | 6 | 0.000 | 0.000 | 0.000 | Not functional — see §8 |
+| Exfiltration | 2 | 0.000 | 0.000 | 0.000 | Not functional, and n=2 is statistically unmeasurable regardless |
 
 ---
 
@@ -145,3 +164,6 @@ Evaluated on held-out test sessions containing full multi-stage attack lifecycle
 
 - **Encrypted Payloads:** The model operates entirely on L3/L4 statistical flow headers and metadata; payload decryption is not required, preserving end-user privacy.
 - **Concept Drift:** Sudden network infrastructure changes (e.g., MTU changes or large backup migrations) can alter IAT and throughput distributions. The adaptive EMA threshold ($\mu_t + 2\sigma_t$) attenuates false alarms, but periodic retraining is recommended.
+- **Lateral Movement & Exfiltration are not reliably detected.** CIC-IDS2017's entire public release contains only ~36 Infiltration flows and ~11 Heartbleed flows — real_flows.csv inherits that scarcity (36 and 2 rows respectively out of 320,000). We tried mitigating this with train-only synthetic oversampling (300 sessions/stage, sampled from the same calibrated feature profiles used by the live demo simulator) and confirmed via a held-out per-stage evaluation that it **did not transfer**: the retrained model still shows 0% recall on both stages against the real test flows, including at the binary (malicious/benign) level, not just stage attribution. Hand-crafted synthetic profiles evidently don't match the real feature distribution of true Infiltration/Heartbleed traffic closely enough to generalize. Closing this gap needs either real additional data (e.g. CIC-IDS2018 or CTU-13, both of which have materially more Infiltration/lateral-movement examples), lab-captured real attack traffic (see `LAB_SETUP.md`), or a signature-based assist for well-known exploits like Heartbleed, which has a deterministic packet-level signature that doesn't need to be learned from scarce examples at all.
+- **Initial Access precision is weak (13.3%).** The stage head over-fires on Initial Access, largely confusing it with Benign HTTP traffic. Reducing the class-weight clip from 50x to 15x roughly doubled precision (6.2% → 13.3%) without materially hurting recall, but the underlying confusion is not resolved — production use would need per-class decision-threshold calibration or a switch to focal loss instead of pure inverse-frequency weighting.
+- **These per-stage numbers are the accuracy that matters for a live demo audience.** The judge-facing simulator (`demo/traffic_simulator.py`) drives all 6 stages from hand-authored synthetic profiles for a smooth visual progression; it does not reflect the trained model's real per-stage capability shown in §6, and would not correctly flag genuine Lateral Movement/Exfiltration traffic if fed through PCAP or live capture instead.
