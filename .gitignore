@@ -35,7 +35,9 @@ Thumbs.db
 # Raw dataset downloads and large flow files (keep benchmark_comparison.csv)
 data/raw/
 data/raw_cicids/
+data/raw_cicids2018/
 real_flows.csv
+real_flows.csv.pre_cicids2018_backup
 data/*.pcap
 data/*.pcapng
 *.tmp

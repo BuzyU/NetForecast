@@ -41,26 +41,28 @@ Traditional Network Intrusion Detection Systems (NIDS) are **reactive**: they fl
 
 ---
 
-## 📊 Benchmark Performance on CIC-IDS2017
+## 📊 Benchmark Performance on CIC-IDS2017 + CIC-IDS2018
 
-Evaluated on **320,000 real-world flows** (253,118 training sequences — including train-only
-synthetic oversampling of two data-starved stages, see below — and 62,478 **100% real, untouched**
-test sequences, across 1,334 real sessions) from the Canadian Institute for Cybersecurity
-**CIC-IDS2017** benchmark across all 8 capture days.
+Evaluated on **327,940 real-world flows** — 320,000 from **CIC-IDS2017** (all 8 capture days) plus
+7,940 real Lateral Movement (Infiltration) flows from **CIC-IDS2018**'s two dedicated infiltration
+days, added because CIC-IDS2017 alone only has ~36 real Lateral Movement examples in its entire
+public release (see `data/augment_lateral_movement.py`). 269,974 training rows (including train-only
+synthetic oversampling of Exfiltration only, see below) and 61,566 **100% real, untouched** test
+rows, across 2,001 real sessions.
 
 | Model Architecture | F1-Score | Precision | Recall (Detection Rate) | False Positive Rate (FPR) | Latency (Inference, CPU) |
 |---|:---:|:---:|:---:|:---:|:---:|
-| **Logistic Regression** *(Linear Baseline)* | 0.505 | 0.692 | 0.398 | 5.31% | < 1 ms |
-| **Isolation Forest** *(Unsupervised Baseline)* | 0.327 | 0.291 | 0.372 | 27.19% | ~ 8 ms |
-| **NetForecast World Model** *(Proposed, MAX Config)* | **0.853** | **0.841** | **0.866** | **4.90%** | **~ 0.7 ms** (measured, single-window forward pass) |
+| **Logistic Regression** *(Linear Baseline)* | 0.562 | 0.689 | 0.475 | 7.12% | < 1 ms |
+| **Isolation Forest** *(Unsupervised Baseline)* | 0.362 | 0.333 | 0.396 | 26.29% | ~ 8 ms |
+| **NetForecast World Model** *(Proposed, MAX Config)* | **0.861** | **0.848** | **0.875** | **5.20%** | **~ 0.7 ms** (measured, single-window forward pass) |
 
 > [!IMPORTANT]
 > **Key Operational Findings (binary malicious-vs-benign detection):**
-> - Class-weighted cross-entropy (clipped to 15x, tuned down from an earlier 50x that over-corrected) and positive-weighted BCE (`pos_weight≈3.01`) give **86.6% recall** at the binary detection level with a **4.90% FPR**, avoiding the alert fatigue of the Isolation Forest baseline (27.19% FPR).
+> - Class-weighted cross-entropy (clipped to 15x, tuned down from an earlier 50x that over-corrected) and positive-weighted BCE (`pos_weight≈2.98`) give **87.5% recall** at the binary detection level with a **5.20% FPR**, avoiding the alert fatigue of the Isolation Forest baseline (26.29% FPR).
 > - **Leakage-Free Validation:** Strict session-level train/test split. The standard scaler is fitted strictly on training sessions — zero test-set information leaks into the normalization parameters.
 >
-> **Per-MITRE-stage capability is uneven — read this before quoting the binary numbers above as "detects all attacks":**
-> Benign/Reconnaissance/C2 are reliably classified (F1 0.75–0.94). Initial Access (web attacks) has real recall (61%) but weak precision (13%) — it over-fires. **The ML model itself does not detect Lateral Movement or Exfiltration (0% recall)** — CIC-IDS2017 only has ~36 Infiltration and ~11 Heartbleed flows in its entire public release, which is too little to learn from; we tried train-only synthetic oversampling for these two stages and confirmed via held-out evaluation that it did not transfer to real traffic. **Exfiltration/Heartbleed is separately covered by a deterministic signature detector** (`capture/signatures.py`) that doesn't rely on the ML model at all — CVE-2014-0160 has a fixed wire-format signature, verified end-to-end against a crafted malicious packet with zero false positives on legitimate traffic. Lateral Movement has no equivalent signature and remains unsolved — it needs real additional data (CIC-IDS2018/CTU-13) or lab-captured traffic. Full per-stage numbers and root-cause analysis are in [`docs/model_card.md`](docs/model_card.md#6-evaluation--comparative-benchmark).
+> **Per-MITRE-stage capability — read this before quoting the binary numbers above as "detects all attacks":**
+> Benign/Reconnaissance/C2 are reliably classified (F1 0.75–0.94). **Lateral Movement is now reliably detected (Precision 83%, Recall 93%, F1 0.88 on 900 real held-out test flows)** — real CIC-IDS2018 Infiltration data replaced the earlier synthetic-oversampling attempt, which a held-out evaluation confirmed did not transfer to real traffic. Initial Access (web attacks) has real recall (64%) but weak precision (14%) — it over-fires. **The ML model does not detect Exfiltration (0% recall)** — CIC-IDS2017 only has ~11 Heartbleed flows in its entire public release (2 in this sample), too little to learn from — but **Exfiltration/Heartbleed is separately covered by a deterministic signature detector** (`capture/signatures.py`) that doesn't rely on ML at all: CVE-2014-0160 has a fixed wire-format signature, verified end-to-end against a crafted malicious packet with zero false positives on legitimate traffic. Full per-stage numbers and root-cause analysis are in [`docs/model_card.md`](docs/model_card.md#6-evaluation--comparative-benchmark).
 
 ---
 
@@ -290,7 +292,12 @@ python data/download_cicids.py
 # 2. Preprocess with stratified attack preservation & session windowing
 python data/preprocess_cicids.py --input-dir data/raw_cicids --output real_flows.csv --sample 40000
 
-# 3. Train MAX-Configuration World Model
+# 3. Augment Lateral Movement with real CIC-IDS2018 Infiltration data (~317MB download).
+#    CIC-IDS2017 alone has only ~36 real Lateral Movement rows -- not enough to learn
+#    from. Optional but strongly recommended; skip only if you don't need that stage.
+python data/augment_lateral_movement.py --target real_flows.csv
+
+# 4. Train MAX-Configuration World Model
 python pipeline_fixed.py \
   --data real_flows.csv \
   --out ./backend/artifacts \
@@ -300,7 +307,10 @@ python pipeline_fixed.py \
   --num-layers 2 \
   --dropout 0.25 \
   --lr 1e-3 \
-  --weight-decay 1e-4
+  --weight-decay 1e-4 \
+  --augment-stages "Exfiltration" \
+  --augment-sessions-per-stage 300 \
+  --class-weight-max 15.0
 ```
 
 > [!TIP]
@@ -400,7 +410,9 @@ Network_Attack_Detection/
 ├── data/                            # Dataset management & preprocessing
 │   ├── download_cicids.py           # Hugging Face mirror chunked downloader
 │   ├── preprocess_cicids.py         # 22-feature mapper with stratified sampling
-│   └── raw_cicids/                  # 8 official CIC-IDS2017 CSV files (844 MB)
+│   ├── augment_lateral_movement.py  # Real CIC-IDS2018 Infiltration data -> Lateral Movement
+│   ├── raw_cicids/                  # 8 official CIC-IDS2017 CSV files (844 MB)
+│   └── raw_cicids2018/              # 2 CIC-IDS2018 infiltration-day CSVs (~317 MB)
 ├── capture/                         # Hardware & network capture tools
 │   ├── live_capture.py              # Scapy-based live sniffer on Ethernet/Wi-Fi
 │   ├── flow_state.py                # Shared 22-feature flow reconstruction (live capture + PCAP)

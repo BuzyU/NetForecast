@@ -59,11 +59,11 @@ NetForecast outperforms both traditional supervised classifiers and unsupervised
 
 | Model | Technique | F1-Score | Precision | Recall | False Positive Rate (FPR) |
 |---|---|---|---|---|---|
-| **Logistic Regression** | Shallow Linear Baseline | 0.505 | 0.692 | 0.398 | 0.053 |
-| **Isolation Forest** | Unsupervised Anomaly Detection | 0.327 | 0.291 | 0.372 | 0.272 |
-| **NetForecast (World Model)** | 2-Layer LSTM + Multi-Head Rollout | **0.853** | **0.841** | **0.866** | **0.049** |
+| **Logistic Regression** | Shallow Linear Baseline | 0.562 | 0.689 | 0.475 | 0.071 |
+| **Isolation Forest** | Unsupervised Anomaly Detection | 0.362 | 0.333 | 0.396 | 0.263 |
+| **NetForecast (World Model)** | 2-Layer LSTM + Multi-Head Rollout | **0.861** | **0.848** | **0.875** | **0.052** |
 
-> Binary malicious-vs-benign detection on held-out real CIC-IDS2017 test sessions (`backend/artifacts/benchmark_comparison.csv`). Per-stage capability is uneven — see `docs/model_card.md` §6 for the honest breakdown (Lateral Movement/Exfiltration are not currently detected due to CIC-IDS2017 data scarcity, ~36 and ~11 real examples in the whole public dataset respectively).
+> Binary malicious-vs-benign detection on held-out real test sessions from CIC-IDS2017 + CIC-IDS2018 (`backend/artifacts/benchmark_comparison.csv`). Per-stage: Benign/Reconnaissance/C2/**Lateral Movement** are all reliable (Lateral Movement fixed via real CIC-IDS2018 data — see `docs/model_card.md` §6). Initial Access over-alerts (weak precision). Exfiltration isn't caught by the ML model at all (only 2 real examples exist) but is covered by a separate deterministic Heartbleed signature detector instead.
 
 #### Interpretable Decision Support:
 - **SHAP (KernelExplainer)**: Calculates exact Shapley values to identify which of the 22 telemetry features pushed the model toward predicting malicious compromise.

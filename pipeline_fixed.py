@@ -654,8 +654,8 @@ def main():
                     "stages": augment_stages,
                     "sessions_per_stage": args.augment_sessions_per_stage if augment_stages else 0,
                     "note": "train-only synthetic oversampling from calibrated per-stage "
-                            "feature profiles; test set is 100% real CIC-IDS2017 flows, "
-                            "untouched by augmentation",
+                            "feature profiles; test set is 100% real flows (CIC-IDS2017 "
+                            "and, if present, CIC-IDS2018), untouched by synthetic augmentation",
                 },
                 "class_weight_max": args.class_weight_max,
                 "best_val_f1": best_val_f1,

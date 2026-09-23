@@ -19,20 +19,20 @@ All identified gaps from the initial audit have been resolved. The system now fu
 
 ---
 
-## 2. Benchmark Comparison Results on Real CIC-IDS2017 Data
+## 2. Benchmark Comparison Results on Real CIC-IDS2017 + CIC-IDS2018 Data
 
-The system was evaluated on **320,000 real flows** (253,118 training sequences — including train-only synthetic oversampling of two data-starved stages — and 62,478 100%-real, untouched test sequences, across 1,334 real sessions) from the official **CIC-IDS2017 dataset** across all 8 capture days.
+The system was evaluated on **327,940 real flows** — 320,000 from CIC-IDS2017 (all 8 capture days) plus 7,940 real Lateral Movement flows from CIC-IDS2018's two infiltration days (269,974 training rows, including train-only synthetic oversampling of Exfiltration only, and 61,566 100%-real, untouched test rows, across 2,001 real sessions). See `data/augment_lateral_movement.py`.
 
 The upgraded **2-layer LSTM World Model (hidden_size=256, dropout=0.25, AdamW + CosineAnnealingLR + Class-Weighted Loss, class-weight clip 15x)** was evaluated against supervised and unsupervised baselines in `backend/artifacts/benchmark_comparison.csv`:
 
 | Model | F1-Score | Precision | Recall | False Positive Rate (FPR) |
 |---|---|---|---|---|
-| **Logistic Regression (baseline)** | 0.505 | 0.692 | 0.398 | 0.0531 (5.31%) |
-| **Isolation Forest (baseline)** | 0.327 | 0.291 | 0.372 | 0.2719 (27.19%) |
-| **LSTM World Model (MAX Config)** | **0.853** | **0.841** | **0.866** | **0.0490 (4.90%)** |
+| **Logistic Regression (baseline)** | 0.562 | 0.689 | 0.475 | 0.0712 (7.12%) |
+| **Isolation Forest (baseline)** | 0.362 | 0.333 | 0.396 | 0.2629 (26.29%) |
+| **LSTM World Model (MAX Config)** | **0.861** | **0.848** | **0.875** | **0.0520 (5.20%)** |
 
 > [!NOTE]
-> These are binary malicious-vs-benign numbers. Per-MITRE-stage, capability is uneven: Benign/Reconnaissance/C2 are reliably classified, Initial Access has real recall (61%) but weak precision (13%), and **Lateral Movement/Exfiltration are not detected at all (0% recall)** — CIC-IDS2017 only has ~36 Infiltration and ~11 Heartbleed flows in its entire public release. We tried train-only synthetic oversampling for these two stages (300 sessions/stage from calibrated feature profiles) and confirmed via held-out evaluation that it did **not** transfer to real traffic. See `docs/model_card.md` §6 and §8 for the full per-stage breakdown and root-cause analysis.
+> These are binary malicious-vs-benign numbers. Per-MITRE-stage: Benign/Reconnaissance/C2 are reliably classified, and **Lateral Movement is now also reliable (Precision 83%, Recall 93%, F1 0.88 on 900 real held-out CIC-IDS2018 test flows)** after replacing the earlier failed synthetic-oversampling attempt with real data. Initial Access has real recall (64%) but weak precision (14%) — the one remaining known gap. **Exfiltration is not detected by the ML model (0% recall, only 2 real examples exist)** but is separately covered by a deterministic Heartbleed (CVE-2014-0160) signature detector that doesn't need training data at all. See `docs/model_card.md` §6 and §8 for the full per-stage breakdown and root-cause analysis.
 
 ---
 
