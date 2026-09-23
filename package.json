@@ -11,5 +11,12 @@
     "build": "npm run build --workspace=frontend",
     "lint": "npm run lint --workspace=frontend",
     "preview": "npm run preview --workspace=frontend"
+  },
+  "optionalDependencies": {
+    "@oxlint/binding-linux-x64-gnu": "1.81.0",
+    "@oxlint/binding-win32-x64-msvc": "1.81.0",
+    "@rolldown/binding-linux-x64-gnu": "1.2.7",
+    "@rolldown/binding-win32-x64-msvc": "1.2.7"
   }
 }
+

@@ -5,6 +5,8 @@ on:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
+  workflow_dispatch:
+
 
 jobs:
   backend-test:
@@ -52,7 +54,8 @@ jobs:
         run: npm ci
 
       - name: Lint with oxlint
-        run: npx --yes oxlint
+        run: npm run lint
+
 
       - name: Build frontend production bundle
         run: npm run build
