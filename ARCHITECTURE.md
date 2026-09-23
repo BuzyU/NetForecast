@@ -288,10 +288,10 @@ In continuous operational monitoring, system hot-reloads, configuration edits, o
 
 - **Continuous Persistence:** Active sessions, flow records, and alerts are stored in SQLite (`backend/data/netforecast.db`) and queried via async SQLAlchemy sessions.
 - **Zero Startup Wipe:** The application lifespan handler preserves existing sessions across server restarts, file edits, and browser tab switches.
-- **Explicit Cycle Archiving (`/cycle/reset`):** A new monitoring cycle begins **only** when the user explicitly clicks `[NEW_CYCLE]` in the UI or invokes the cycle management API:
+- **Explicit Cycle Archiving (`/system/cycle/start`):** A new monitoring cycle begins **only** when the user explicitly clicks `[NEW_CYCLE]` in the UI or invokes the cycle management API:
   1. Active tables (`SessionDB`, `FlowRecordDB`, `AlertDB`) are atomically exported into an immutable JSON archive (`backend/data/archives/cycle_<timestamp>.json`).
   2. Active tables are flushed clean for the new operational cycle.
-  3. Historical cycles remain fully accessible and auditable via `/cycle/archives`.
+  3. Historical cycles remain fully accessible and auditable via `/system/cycles`.
 
 ---
 

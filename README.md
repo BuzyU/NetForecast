@@ -250,7 +250,7 @@ Follow this 5-stage workflow for live judge demonstrations:
 4. **Demonstrate Live Mode & Purge:**  
    Switch the system mode to live via the UI or API (`POST /system/mode`). Click **"Purge Simulated Data"** (`POST /system/purge-simulated`) to wipe synthetic demo flows from the operational database while preserving genuine live traffic.
 5. **Cycle Reset & Archive:**  
-   Show the non-destructive telemetry cycle system: trigger **Archive Cycle** (`POST /cycle/reset`), which snaps the current state into historical archives (`/cycle/archives`) and starts a fresh monitoring session without restarting the server.
+   Show the non-destructive telemetry cycle system: trigger **Archive Cycle** (`POST /system/cycle/start`), which snaps the current state into historical archives (`/system/cycles`) and starts a fresh monitoring session without restarting the server.
 
 ## 📡 Live Traffic & PCAP Ingestion
 
@@ -309,34 +309,39 @@ python pipeline_fixed.py \
 
 ## 🔌 API Endpoints
 
-| Category | Method | Endpoint | Description | Rate Limit |
-|:---:|:---:|---|---|:---:|
-| **Health & Info** | `GET` | `/health` | System status, device (CPU/CUDA), active features count | 120/min |
-| **Forecasting** | `POST` | `/predict` | Single-step state transition & stage prediction from $6 \times 22$ window | 120/min |
-| | `POST` | `/forecast` | $k$-step Monte Carlo rollout with uncertainty intervals & EMA | 120/min |
-| | `GET` | `/forecast/view/html` | Printable in-browser HTML forecast trajectory dossier | 60/min |
-| | `GET` | `/forecast/export/html` | Download themed HTML forecast dossier | 60/min |
-| | `GET` | `/forecast/export/csv` | Download forecast steps as CSV | 60/min |
-| | `GET` | `/forecast/export/json` | Download forecast steps as JSON | 60/min |
-| **Explainability** | `POST` | `/explain` | Feature attribution (`method: "shap"` or `method: "gradient"`) | 120/min |
-| | `GET` | `/explain/view/html` | Printable in-browser HTML attribution dossier (SHAP/Gradient) | 60/min |
-| | `GET` | `/explain/export/html` | Download themed HTML explanation dossier | 60/min |
-| | `GET` | `/explain/export/csv` | Download feature attributions as CSV | 60/min |
-| | `GET` | `/explain/export/json` | Download feature attributions as JSON | 60/min |
-| **Forensic Reports** | `GET` | `/reports/view/html` | Printable in-browser HTML incident forensic dossier | 60/min |
-| | `GET` | `/reports/export/html` | Download themed HTML forensic report | 60/min |
-| | `GET` | `/reports/export/csv` | Export forensic CSV report for sessions and alerts | 60/min |
-| | `GET` | `/reports/export/json` | Export full structured JSON telemetry & kill-chain report | 60/min |
-| **Ingestion** | `POST` | `/ingest` | Ingest single flow telemetry record (gated by mode) | 120/min |
-| | `POST` | `/ingest/csv` | Bulk upload flow log CSV | 60/min |
-| | `POST` | `/ingest/pcap` | Upload raw `.pcap` file for Scapy flow reconstruction | 30/min |
-| **System & Cycle** | `GET/POST`| `/system/mode` | Query or toggle between `live` and `simulated` modes | 120/min |
-| | `POST` | `/system/purge-simulated` | Delete all simulated flows, sessions, and alerts | 60/min |
-| | `POST` | `/cycle/reset` | Archive current monitoring cycle and start a fresh cycle | 60/min |
-| | `GET` | `/cycle/archives` | List historical cycle archives | 120/min |
-| **Alerts & WS** | `GET` | `/alerts` | Query active & historical alerts with triage status | 120/min |
-| | `POST` | `/alerts/{id}/acknowledge` | Acknowledge alert with operator notes | 120/min |
-| | `WS` | `/ws/live` | WebSocket real-time flow telemetry stream | — |
+> [!NOTE]
+> All HTTP routes share a single global SlowAPI limit of **120 requests/minute per client IP** (`backend/app/main.py`) — there is currently no differentiated per-endpoint throttling.
+
+| Category | Method | Endpoint | Description |
+|:---:|:---:|---|---|
+| **Health & Info** | `GET` | `/health` | System status, device (CPU/CUDA), active features count |
+| **Forecasting** | `POST` | `/predict` | Single-step state transition & stage prediction from $6 \times 22$ window |
+| | `POST` | `/forecast` | $k$-step Monte Carlo rollout with uncertainty intervals & EMA |
+| | `GET` | `/forecast/view/html` | Printable in-browser HTML forecast trajectory dossier |
+| | `GET` | `/forecast/export/html` | Download themed HTML forecast dossier |
+| | `GET` | `/forecast/export/csv` | Download forecast steps as CSV |
+| | `GET` | `/forecast/export/json` | Download forecast steps as JSON |
+| **Explainability** | `POST` | `/explain` | Feature attribution (`method: "shap"` or `method: "gradient"`) |
+| | `GET` | `/explain/view/html` | Printable in-browser HTML attribution dossier (SHAP/Gradient) |
+| | `GET` | `/explain/export/html` | Download themed HTML explanation dossier |
+| | `GET` | `/explain/export/csv` | Download feature attributions as CSV |
+| | `GET` | `/explain/export/json` | Download feature attributions as JSON |
+| **Forensic Reports** | `GET` | `/reports/view/html` | Printable in-browser HTML incident forensic dossier |
+| | `GET` | `/reports/export/html` | Download themed HTML forensic report |
+| | `GET` | `/reports/export/csv` | Export forensic CSV report for sessions and alerts |
+| | `GET` | `/reports/export/json` | Export full structured JSON telemetry & kill-chain report |
+| **Ingestion** | `POST` | `/ingest` | Ingest single flow telemetry record (gated by mode) |
+| | `POST` | `/ingest/csv` | Bulk upload flow log CSV |
+| | `POST` | `/ingest/pcap` | Upload raw `.pcap` file for Scapy flow reconstruction |
+| **System & Cycle** | `GET/POST`| `/system/mode` | Query or toggle between `live` and `simulated` modes |
+| | `POST` | `/system/purge-simulated` | Delete all simulated flows, sessions, and alerts |
+| | `POST` | `/system/cycle/start` | Archive current monitoring cycle and start a fresh cycle |
+| | `GET` | `/system/cycle/current` | Query the currently active monitoring cycle |
+| | `GET` | `/system/cycles` | List historical cycle archives |
+| **Alerts & WS** | `GET` | `/alerts` | Query active & historical alerts with triage status |
+| | `GET` | `/alerts/stats` | Aggregate alert statistics |
+| | `POST` | `/alerts/{id}/acknowledge` | Acknowledge alert with operator notes |
+| | `WS` | `/ws/live` | WebSocket real-time flow telemetry stream |
 
 ---
 
@@ -350,20 +355,19 @@ Network_Attack_Detection/
 │   │   ├── database.py              # SQLite + async SQLAlchemy session models
 │   │   ├── inference.py             # World Model forward pass, MC rollout & SHAP
 │   │   ├── ingestion.py             # Sliding window buffer & Adaptive EMA threshold
-│   │   ├── network_identity.py      # IP subnetting, loopback/bogon & reverse DNS cache
-│   │   ├── process_resolver.py      # Windows socket-to-PID & executable correlation
+│   │   ├── network_identity.py      # IP subnetting & loopback/private-range classification
+│   │   ├── process_resolver.py      # Cross-platform (psutil) socket-to-PID & executable correlation
 │   │   ├── main.py                  # App factory, SlowAPI rate limiter & CORS
 │   │   ├── model_loader.py          # Dynamic artifact loader (hidden_size, scaler)
 │   │   ├── schemas.py               # Pydantic request/response validation schemas
 │   │   └── routes/                  # Modular endpoint routers
 │   │       ├── alerts.py            # Alert triage & acknowledge
-│   │       ├── cycle.py             # Cycle reset, persistence & archive browser
 │   │       ├── explain.py           # SHAP / Gradient attribution & HTML/CSV/JSON dossiers
 │   │       ├── forecast.py          # Prediction, MC rollout & HTML/CSV/JSON dossiers
 │   │       ├── ingest.py            # Single & batch flow ingestion (mode-gated)
 │   │       ├── pcap.py              # Scapy PcapReader flow reconstruction
 │   │       ├── reports.py           # Forensic HTML dossiers & CSV/JSON exports
-│   │       ├── system.py            # Mode switcher (live vs simulated) & purge
+│   │       ├── system.py            # Mode switcher, purge & cycle reset/persistence/archive
 │   │       └── ws.py                # Real-time WebSocket event broadcaster
 │   ├── artifacts/                   # Serialized production models & metrics
 │   │   ├── benchmark_comparison.csv # Baseline comparison table
@@ -371,7 +375,10 @@ Network_Attack_Detection/
 │   │   ├── scaler.pkl               # StandardScaler fitted on training set
 │   │   └── world_model.pt           # Checkpointed PyTorch LSTM weights (256 units)
 │   └── tests/
-│       └── test_inference.py        # 15 unit & integration tests (100% pass)
+│       ├── test_inference.py        # 15 model/inference/explainability unit tests
+│       ├── test_api_integration.py  # End-to-end API & ingestion flow tests
+│       └── test_flow_parity.py      # PCAP vs live-capture feature-extraction parity tests
+│       # 26 tests total, 100% pass
 ├── frontend/                        # React 18 + Vite SOC Dashboard
 │   ├── src/
 │   │   ├── components/              # Reusable UI components
