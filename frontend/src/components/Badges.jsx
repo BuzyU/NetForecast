@@ -191,7 +191,7 @@ export function WellbeingModal({ isOpen, onClose }) {
   useEffect(() => {
     if (!isOpen) return;
     let mounted = true;
-    apiFetch('/system/cycle/history')
+    apiFetch('/system/cycles')
       .then(data => {
         if (mounted) {
           setCycles(Array.isArray(data) ? data : []);

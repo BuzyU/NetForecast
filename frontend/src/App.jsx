@@ -1,11 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Activity, AlertTriangle, Upload, Eye,
   MonitorDot, Settings, BarChart3, Terminal,
   Wifi, Laptop, RotateCcw, HeartPulse,
 } from 'lucide-react';
 import { apiFetch, apiPost, createWebSocket } from './api';
-import { formatTime } from './utils';
+import { formatTime, isAttackFlow } from './utils';
 import { WellbeingModal } from './components/Badges';
 import Dashboard from './components/Dashboard';
 import ForecastView from './components/ForecastView';
@@ -33,6 +33,9 @@ export default function App() {
 
   // Live flows and cycle management (persists across navigation)
   const [liveFlows, setLiveFlows] = useState([]);
+  // Real-time views (Live Logs, Dashboard's Real-Time Flows tab) show only
+  // flagged attacks, not the raw benign firehose — see LiveLogsView.
+  const attackFlows = useMemo(() => liveFlows.filter(isAttackFlow), [liveFlows]);
   const [wsConnected, setWsConnected] = useState(false);
   const [hostIdentity, setHostIdentity] = useState(null);
   const [currentCycle, setCurrentCycle] = useState(null);
@@ -309,7 +312,7 @@ export default function App() {
             onSelectSession={onSelectSession}
             featureList={featureList}
             systemMode={systemMode}
-            liveFlows={liveFlows}
+            liveFlows={attackFlows}
           />
         )}
         {view === 'forecast' && <ForecastView session={selectedSession} onBack={() => setView('dashboard')} featureList={featureList}/>}

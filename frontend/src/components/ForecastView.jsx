@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
-  ReferenceLine, ResponsiveContainer,
+  ReferenceLine, ResponsiveContainer, Legend,
 } from 'recharts';
-import { Activity, AlertTriangle } from 'lucide-react';
+import { Activity, AlertTriangle, ShieldCheck, Loader2 } from 'lucide-react';
 import { apiFetch, apiPost } from '../api';
 import {
   stageClass, stageColor, formatTime, formatProb,
@@ -14,6 +14,8 @@ import {
   DirBadge, SourceBadge,
   CompromiseIndicator, KillChain,
 } from './Badges';
+
+const WINDOW_SIZE = 6;
 
 export default function ForecastView({ session, onBack, featureList }) {
   const [forecast, setForecast] = useState(null);
@@ -32,6 +34,8 @@ export default function ForecastView({ session, onBack, featureList }) {
     (async () => {
       setLoading(true);
       setError(null);
+      setForecast(null);
+      setExplanation(null);
       try {
         const allFlows = await apiFetch(`/sessions/${encodeURIComponent(sessionKey)}/flows?limit=100`);
         if (!active) return;
@@ -40,11 +44,15 @@ export default function ForecastView({ session, onBack, featureList }) {
           setError('No flow records captured for this session yet.');
           return;
         }
-        let windowFlows = allFlows.slice(0, 6).reverse();
-        // Pad window up to 6 flows if session has fewer than 6 flows
-        while (windowFlows.length < 6) {
-          windowFlows.unshift(windowFlows[0]);
+        // Need a full real 6-flow window before forecasting — previously this
+        // padded short sessions by duplicating the earliest flow, which
+        // produces a forecast partly built on fake repeated observations.
+        // Showing an honest "collecting baseline" state instead is more
+        // trustworthy than a forecast that looks confident but isn't.
+        if (allFlows.length < WINDOW_SIZE) {
+          return;
         }
+        const windowFlows = allFlows.slice(0, WINDOW_SIZE).reverse();
         const window = windowFlows.map(f => featOrder.map(k => f.features?.[k] ?? 0));
         const [fc, exp] = await Promise.all([
           apiPost('/forecast', { window, k_steps: 6, n_mc_samples: 20, needs_scaling: true }),
@@ -62,6 +70,28 @@ export default function ForecastView({ session, onBack, featureList }) {
 
     return () => { active = false; };
   }, [sessionKey, featOrder]);
+
+  // Estimated wall-clock time per forecast step, from this session's own
+  // observed flow cadence — not a made-up constant. Falls back to null
+  // (ETA hidden) if timestamps aren't usable.
+  const avgStepMs = useMemo(() => {
+    if (!flows || flows.length < 2) return null;
+    const times = flows.map(f => new Date(f.timestamp).getTime()).filter(t => !Number.isNaN(t));
+    if (times.length < 2) return null;
+    const deltas = [];
+    for (let i = 0; i < times.length - 1; i++) deltas.push(Math.abs(times[i] - times[i + 1]));
+    const avg = deltas.reduce((a, b) => a + b, 0) / deltas.length;
+    return avg > 0 ? avg : null;
+  }, [flows]);
+
+  function formatEta(steps) {
+    if (!avgStepMs) return null;
+    const ms = avgStepMs * steps;
+    if (ms < 1000) return '<1s';
+    if (ms < 60000) return `~${Math.round(ms / 1000)}s`;
+    if (ms < 3600000) return `~${Math.round(ms / 60000)}m`;
+    return `~${Math.round(ms / 3600000)}h`;
+  }
 
   if (!session) {
     return (
@@ -82,8 +112,23 @@ export default function ForecastView({ session, onBack, featureList }) {
     return <div className="empty-state"><AlertTriangle size={28} color="var(--severity-high)"/><p>{error}</p></div>;
   }
 
+  // Honest "collecting baseline" state instead of forecasting on a padded/
+  // duplicated window (see the fetch effect above).
+  if (!loading && !forecast && flows.length > 0 && flows.length < WINDOW_SIZE) {
+    return (
+      <div className="empty-state">
+        <Loader2 size={28} color="var(--text-muted)" className="spin-icon"/>
+        <p>Collecting baseline: {flows.length}/{WINDOW_SIZE} flows</p>
+        <span className="mono text-xs text-muted">
+          The world model needs a full {WINDOW_SIZE}-flow window of real observations before it can forecast. Come back once more traffic has been captured for this session.
+        </span>
+      </div>
+    );
+  }
+
   const chartData = forecast?.steps?.map(s => ({
     step: `+${s.step}`,
+    stepNum: s.step,
     mean: s.infiltration_prob_mean,
     ema: s.infiltration_prob_ema,
     upper: Math.min(1, s.infiltration_prob_mean + s.infiltration_prob_std),
@@ -95,6 +140,29 @@ export default function ForecastView({ session, onBack, featureList }) {
   const maxImportance = explanation?.attributions
     ? Math.max(...explanation.attributions.map(a => Math.abs(a.importance)))
     : 1;
+
+  // Only worth a full forecast dashboard when there's an actual attack
+  // signal — either the model already projects escalation, or the current
+  // window already shows risk. A flat all-Benign trajectory isn't useful
+  // to visualize in detail.
+  const hasAttackSignal = Boolean(
+    forecast?.alert_triggered ||
+    chartData.some(d => d.stage && d.stage !== 'Benign') ||
+    (explanation?.infiltration_probability ?? 0) > 0.1
+  );
+
+  if (forecast && !hasAttackSignal) {
+    return (
+      <div className="empty-state">
+        <ShieldCheck size={28} color="var(--severity-low)"/>
+        <p style={{ color: 'var(--severity-low)' }}>No attack activity projected</p>
+        <span className="mono text-xs text-muted">
+          {session.src_ip} &rarr; {session.dst_ip} — the model forecasts this session staying Benign across all {chartData.length} steps. Nothing to visualize.
+        </span>
+        <button className="btn btn-sm" onClick={onBack} style={{ marginTop: 'var(--sp-3)' }}>&larr; BACK TO DASHBOARD</button>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -118,7 +186,10 @@ export default function ForecastView({ session, onBack, featureList }) {
           <span className="severity-badge high" title={error} style={{ fontSize: '0.6rem' }}>REFRESH FAILED</span>
         )}
         {forecast?.alert_triggered && (
-          <span className="severity-badge critical">ALERT AT STEP +{forecast.alert_at_step}</span>
+          <span className="severity-badge critical">
+            ALERT AT STEP +{forecast.alert_at_step}
+            {formatEta(forecast.alert_at_step) && <> &middot; ETA {formatEta(forecast.alert_at_step)}</>}
+          </span>
         )}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 'var(--sp-2)' }}>
           <button
@@ -158,21 +229,41 @@ export default function ForecastView({ session, onBack, featureList }) {
             <span className="panel-meta">MC n=20 &middot; EMA &alpha;=0.4</span>
           </div>
           <div className="panel-body chart-container" style={{ minHeight: 320 }}>
+            <p className="mono text-xs text-muted" style={{ marginBottom: 'var(--sp-2)' }}>
+              Projected probability this session is compromised, {chartData.length} steps into the future
+              {avgStepMs ? ` (~${formatEta(1)?.replace('~', '')} per step, based on this session's own flow rate)` : ''}.
+              The shaded band is model uncertainty (20 Monte Carlo rollouts) — wider band means less confidence.
+            </p>
             <ResponsiveContainer width="100%" height={260}>
               <AreaChart data={chartData} margin={{ top: 10, right: 20, bottom: 5, left: 10 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#d4c5b0"/>
-                <XAxis dataKey="step" tick={{ fontSize: 11 }}/>
-                <YAxis domain={[0, 1]} ticks={[0, 0.25, 0.5, 0.75, 1.0]} tick={{ fontSize: 11 }}/>
+                <XAxis
+                  dataKey="step"
+                  tick={{ fontSize: 11 }}
+                  label={{ value: 'Forecast Steps Ahead', position: 'insideBottom', offset: -3, fontSize: 11, fill: '#8a7f72' }}
+                />
+                <YAxis
+                  domain={[0, 1]}
+                  ticks={[0, 0.25, 0.5, 0.75, 1.0]}
+                  tick={{ fontSize: 11 }}
+                  label={{ value: 'Infiltration Risk', angle: -90, position: 'insideLeft', fontSize: 11, fill: '#8a7f72' }}
+                />
                 <Tooltip
                   contentStyle={{ background: '#fffbf5', border: '1px solid #d4c5b0', borderRadius: 3, fontSize: 12 }}
                   labelStyle={{ color: '#5a5245' }}
+                  formatter={(value, name) => [typeof value === 'number' ? value.toFixed(3) : value, name]}
+                  labelFormatter={(label, payload) => {
+                    const eta = payload?.[0]?.payload?.stepNum ? formatEta(payload[0].payload.stepNum) : null;
+                    return `Step ${label}${eta ? ` (ETA ${eta})` : ''}`;
+                  }}
                 />
-                <Area type="monotone" dataKey="upper" stroke="none" fill="#e67e22" fillOpacity={0.08} stackId="band" isAnimationActive={false}/>
-                <Area type="monotone" dataKey="lower" stroke="none" fill="#f5efe6" fillOpacity={1} stackId="band" isAnimationActive={false}/>
-                <Area type="monotone" dataKey="mean" stroke="#e67e22" strokeWidth={2} fill="none" name="MC Mean" isAnimationActive={false}/>
-                <Area type="monotone" dataKey="ema" stroke="#8a7f72" strokeWidth={1.5} strokeDasharray="4 3" fill="none" name="EMA" isAnimationActive={false}/>
+                <Legend verticalAlign="top" height={28} wrapperStyle={{ fontSize: 11 }}/>
+                <Area type="monotone" dataKey="upper" stroke="none" fill="#e67e22" fillOpacity={0.08} stackId="band" isAnimationActive={false} name="Uncertainty band" legendType="none"/>
+                <Area type="monotone" dataKey="lower" stroke="none" fill="#f5efe6" fillOpacity={1} stackId="band" isAnimationActive={false} legendType="none"/>
+                <Area type="monotone" dataKey="mean" stroke="#e67e22" strokeWidth={2} fill="none" name="Risk (MC mean)" isAnimationActive={false}/>
+                <Area type="monotone" dataKey="ema" stroke="#8a7f72" strokeWidth={1.5} strokeDasharray="4 3" fill="none" name="Smoothed trend (EMA)" isAnimationActive={false}/>
                 <ReferenceLine y={forecast?.threshold || 0.5} stroke="#c0392b" strokeDasharray="6 4" strokeWidth={1}
-                  label={{ value: 'Threshold', position: 'right', fill: '#c0392b', fontSize: 10 }}/>
+                  label={{ value: 'Alert threshold', position: 'right', fill: '#c0392b', fontSize: 10 }}/>
               </AreaChart>
             </ResponsiveContainer>
 

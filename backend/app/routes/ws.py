@@ -5,6 +5,7 @@ BUG-01 fix: _active_connections and broadcast() moved to live.py to allow
 ingestion.py to import broadcast without a circular dependency.
 """
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
@@ -49,6 +50,11 @@ async def get_sessions(
     limit: int = Query(50, ge=1, le=200),
     sort_by: str = Query("last_seen", description="Sort field: last_seen, latest_risk_score, flow_count"),
     source: Optional[str] = Query(None, description="Filter by source: live, simulated, or all"),
+    active_within_seconds: Optional[int] = Query(
+        None, ge=1,
+        description="Only return sessions whose last_seen is within this many seconds "
+                     "(e.g. 300 for a true 'currently active' view). Omit for full history.",
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """Get tracked sessions with their latest risk scores."""
@@ -63,6 +69,9 @@ async def get_sessions(
         stmt = stmt.where(SessionDB.source != "simulated")
     elif source == "simulated":
         stmt = stmt.where(SessionDB.source == "simulated")
+    if active_within_seconds is not None:
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=active_within_seconds)
+        stmt = stmt.where(SessionDB.last_seen >= cutoff)
 
     stmt = stmt.order_by(sort_col).limit(limit)
     result = await db.execute(stmt)

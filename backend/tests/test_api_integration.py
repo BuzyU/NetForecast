@@ -101,6 +101,23 @@ def test_ingest_flow_updates_session(client: TestClient):
     matching = [s for s in sessions if "192.168.1.110->10.0.0.20" in s["session_key"]]
     assert len(matching) > 0
 
+    # active_within_seconds should still include a session just created
+    fresh_res = client.get("/sessions?active_within_seconds=300")
+    assert fresh_res.status_code == 200
+    fresh = [s for s in fresh_res.json() if "192.168.1.110->10.0.0.20" in s["session_key"]]
+    assert len(fresh) > 0
+
+    # An impossibly small window should exclude everything (nothing is
+    # "active within the last 0 seconds") -- this is what the Dashboard's
+    # "Active Sessions" tab relies on to stop stale sessions from stacking up.
+    stale_res = client.get("/sessions?active_within_seconds=1")
+    assert stale_res.status_code == 200
+    import time
+    time.sleep(1.1)
+    stale_res2 = client.get("/sessions?active_within_seconds=1")
+    stale_matching = [s for s in stale_res2.json() if "192.168.1.110->10.0.0.20" in s["session_key"]]
+    assert len(stale_matching) == 0
+
 
 def test_ingest_window_and_predict_flow(client: TestClient):
     """Ingest a window of 6 flows to trigger model prediction automatically."""

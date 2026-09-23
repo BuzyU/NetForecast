@@ -12,10 +12,15 @@ export default function Dashboard({ onSelectSession, systemMode, liveFlows = [] 
   const [sortBy, setSortBy] = useState('last_seen');
   const [dashboardTab, setDashboardTab] = useState('sessions'); // 'sessions' | 'live_flows'
 
+  // "Active" should mean currently active, not "ever seen this cycle" —
+  // a session idle for more than this is no longer shown here (it's still
+  // in the DB and fully visible in Reports' full audit, just not this view).
+  const ACTIVE_WINDOW_SECONDS = 300;
+
   const refresh = useCallback(() => {
     const srcParam = systemMode === 'live' ? '&source=live' : '';
     Promise.all([
-      apiFetch(`/sessions?limit=100&sort_by=${sortBy}${srcParam}`),
+      apiFetch(`/sessions?limit=100&sort_by=${sortBy}&active_within_seconds=${ACTIVE_WINDOW_SECONDS}${srcParam}`),
       apiFetch('/dashboard/stats'),
       apiFetch('/alerts/stats'),
     ]).then(([s, st, as]) => {

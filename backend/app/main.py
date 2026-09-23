@@ -205,6 +205,10 @@ async def health_check():
         model_version=artifacts.model_version if model_ok else None,
         model_hash=artifacts.model_hash if model_ok else None,
         scaler_hash=artifacts.scaler_hash if model_ok else None,
+        hidden_size=artifacts.config.get("hidden_size") if model_ok and artifacts.config else None,
+        num_layers=artifacts.config.get("num_layers") if model_ok and artifacts.config else None,
+        dropout=artifacts.config.get("lstm_dropout") if model_ok and artifacts.config else None,
+        window_size=artifacts.config.get("window") if model_ok and artifacts.config else None,
     )
 
 

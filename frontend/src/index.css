@@ -805,28 +805,67 @@ a:hover { text-decoration: underline; }
 }
 
 .terminal-body {
-  height: calc(100vh - 220px);
+  height: calc(100vh - 260px);
   overflow-y: auto;
   padding: var(--sp-2);
 }
 
-.terminal-line {
-  padding: 1px var(--sp-2);
+/* Fixed-width grid columns so fields line up between rows instead of the
+   old inline-span layout, which shifted per-row depending on which fields
+   were present ("stuck together" symptom). */
+.terminal-row {
+  display: grid;
+  grid-template-columns: 80px 190px 1fr 120px 64px 130px 90px;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 5px var(--sp-2);
   border-radius: var(--radius-sm);
-  white-space: nowrap;
-  line-height: 1.6;
+  line-height: 1.5;
+  border-left: 2px solid transparent;
 }
 
-.terminal-line:hover {
+.terminal-row-header {
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--text-on-dark-muted);
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border-dark);
+  padding-bottom: var(--sp-2);
+  margin-bottom: 2px;
+}
+
+.terminal-body .terminal-row:not(.terminal-row-header):hover {
   background: var(--bg-dark-hover);
 }
 
-.terminal-line .ts { color: var(--text-on-dark-muted); }
-.terminal-line .ip { color: var(--text-on-dark-secondary); }
-.terminal-line .sep { color: var(--text-on-dark-muted); }
-.terminal-line .val { color: var(--text-on-dark); }
-.terminal-line .alert-flag { color: var(--severity-critical); font-weight: 700; }
-.terminal-line .stage-flag { color: var(--accent); }
+.terminal-row .ts { color: var(--text-on-dark-muted); white-space: nowrap; }
+.terminal-row .ip { color: var(--text-on-dark-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.terminal-row .ip .sep { color: var(--text-on-dark-muted); }
+.terminal-row .val { color: var(--text-on-dark); white-space: nowrap; }
+.terminal-row .app-cell { overflow: hidden; text-overflow: ellipsis; }
+.terminal-row .prob-cell { font-weight: 700; }
+
+.terminal-row .attack-flag {
+  font-weight: 700;
+  color: var(--severity-critical);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.terminal-row .attack-technique {
+  font-weight: 400;
+  font-size: 0.62rem;
+  color: var(--text-on-dark-muted);
+}
+
+/* Row tinting by attack stage (left accent bar), reusing the same stage
+   color language as the rest of the dashboard (kill-chain, badges). */
+.terminal-row.stage-reconnaissance { border-left-color: #2980b9; }
+.terminal-row.stage-initial-access { border-left-color: #d4a017; }
+.terminal-row.stage-lateral-movement { border-left-color: #e67e22; }
+.terminal-row.stage-c2 { border-left-color: #d35400; }
+.terminal-row.stage-exfiltration { border-left-color: #c0392b; background: rgba(192, 57, 43, 0.08); }
 
 .terminal-empty {
   display: flex;
@@ -882,6 +921,8 @@ a:hover { text-decoration: underline; }
 }
 
 @keyframes spin { to { transform: rotate(360deg); } }
+
+.spin-icon { animation: spin 1.4s linear infinite; }
 
 /* ── Settings Grid ────────────────────────────────────────────── */
 .settings-grid {

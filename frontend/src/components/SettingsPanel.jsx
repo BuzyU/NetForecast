@@ -146,10 +146,10 @@ export default function SettingsPanel({
           <span className="panel-title">MODEL_INFO</span>
         </div>
         <div className="panel-body">
-          <div className="settings-row"><span className="settings-key">ARCHITECTURE</span><span className="settings-val">2-Layer LSTM (hidden=128, dropout=0.2)</span></div>
+          <div className="settings-row"><span className="settings-key">ARCHITECTURE</span><span className="settings-val">{health?.num_layers || 2}-Layer LSTM (hidden={health?.hidden_size ?? '—'}, dropout={health?.dropout ?? '—'})</span></div>
           <div className="settings-row"><span className="settings-key">DEVICE</span><span className="settings-val">{health?.device?.toUpperCase() || 'CPU'}</span></div>
           <div className="settings-row"><span className="settings-key">FEATURES</span><span className="settings-val">{health?.features_count || 22}</span></div>
-          <div className="settings-row"><span className="settings-key">WINDOW_SIZE</span><span className="settings-val">6</span></div>
+          <div className="settings-row"><span className="settings-key">WINDOW_SIZE</span><span className="settings-val">{health?.window_size ?? 6}</span></div>
           <div className="settings-row"><span className="settings-key">STAGES</span><span className="settings-val">{health?.stages?.length || 6}</span></div>
           <div className="settings-row"><span className="settings-key">ALERT_THRESHOLD</span><span className="settings-val">0.50 (Adaptive EMA enabled)</span></div>
           <div className="settings-row"><span className="settings-key">MC_SAMPLES</span><span className="settings-val">20</span></div>

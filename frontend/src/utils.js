@@ -39,6 +39,28 @@ export function stageColor(stage) {
   return map[stage] || '#8a7f72';
 }
 
+// MITRE ATT&CK technique reference per stage (matches README kill-chain table).
+export const STAGE_TECHNIQUE = {
+  'Reconnaissance': 'T1595 / T1046',
+  'Initial Access': 'T1190 / T1110',
+  'Lateral Movement': 'T1021 / T1210',
+  'C2': 'T1071 / T1573',
+  'Exfiltration': 'T1041 / T1048',
+};
+
+// ── Attack detection ────────────────────────────────────────────
+// A flow counts as an active attack when the model's infiltration
+// probability crosses the alert threshold (0.5, matching the backend
+// default) OR the predicted stage is non-Benign. Either check alone can
+// miss edge cases (e.g. a non-Benign stage prediction just under the
+// probability threshold), so both are checked.
+export function isAttackFlow(flow) {
+  if (!flow) return false;
+  const prob = flow.infiltration_prob ?? flow.infiltration_probability ?? 0;
+  const stage = flow.predicted_stage;
+  return prob > 0.5 || (!!stage && stage !== 'Benign');
+}
+
 // ── Severity ──────────────────────────────────────────────────
 export function severityClass(prob) {
   if (prob >= 0.8) return 'critical';

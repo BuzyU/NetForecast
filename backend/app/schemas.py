@@ -254,6 +254,10 @@ class HealthResponse(BaseModel):
     model_version: Optional[str] = "1.0.0"
     model_hash: Optional[str] = None
     scaler_hash: Optional[str] = None
+    hidden_size: Optional[int] = None
+    num_layers: Optional[int] = None
+    dropout: Optional[float] = None
+    window_size: Optional[int] = None
 
 
 # ── WebSocket messages ───────────────────────────────────────────────

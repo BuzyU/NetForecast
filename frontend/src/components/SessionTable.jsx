@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { Database, Radio } from 'lucide-react';
+import { Database, ShieldCheck } from 'lucide-react';
 import {
   DirBadge, IdentityBadge, AppBadge, PacketStat,
   CompromiseIndicator, KillChainCompact,
@@ -20,9 +20,9 @@ function SessionTable({
       <div className="data-table-wrap">
         {liveFlows.length === 0 ? (
           <div className="empty-state">
-            <Radio size={28} color="var(--text-muted)"/>
-            <p>Waiting for real-time live flow packets...</p>
-            <span className="mono text-xs text-muted">Flows captured via scapy / Npcap or simulator stream here automatically.</span>
+            <ShieldCheck size={28} color="var(--severity-low)"/>
+            <p>Monitoring — no active threats</p>
+            <span className="mono text-xs text-muted">Only flagged attacks appear here. Traffic is flowing normally.</span>
           </div>
         ) : (
           <table className="data-table">
