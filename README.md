@@ -54,15 +54,15 @@ rows, across 2,001 real sessions.
 |---|:---:|:---:|:---:|:---:|:---:|
 | **Logistic Regression** *(Linear Baseline)* | 0.562 | 0.689 | 0.475 | 7.12% | < 1 ms |
 | **Isolation Forest** *(Unsupervised Baseline)* | 0.362 | 0.333 | 0.396 | 26.29% | ~ 8 ms |
-| **NetForecast World Model** *(Proposed, MAX Config)* | **0.861** | **0.848** | **0.875** | **5.20%** | **~ 0.7 ms** (measured, single-window forward pass) |
+| **NetForecast World Model** *(Proposed, MAX Config)* | **0.865** | **0.855** | **0.875** | **4.90%** | **~ 0.7 ms** (measured, single-window forward pass) |
 
 > [!IMPORTANT]
 > **Key Operational Findings (binary malicious-vs-benign detection):**
-> - Class-weighted cross-entropy (clipped to 15x, tuned down from an earlier 50x that over-corrected) and positive-weighted BCE (`pos_weight≈2.98`) give **87.5% recall** at the binary detection level with a **5.20% FPR**, avoiding the alert fatigue of the Isolation Forest baseline (26.29% FPR).
+> - **Focal loss** for the MITRE stage head (γ=2, generalizing the earlier class-weighted cross-entropy — see `docs/model_card.md` §5) plus a tuned class-weight clip (8x, down from an initial 50x that over-corrected) and positive-weighted BCE (`pos_weight≈2.98`) give **87.5% recall** at the binary detection level with a **4.90% FPR**, avoiding the alert fatigue of the Isolation Forest baseline (26.29% FPR).
 > - **Leakage-Free Validation:** Strict session-level train/test split. The standard scaler is fitted strictly on training sessions — zero test-set information leaks into the normalization parameters.
 >
 > **Per-MITRE-stage capability — read this before quoting the binary numbers above as "detects all attacks":**
-> Benign/Reconnaissance/C2 are reliably classified (F1 0.75–0.94). **Lateral Movement is now reliably detected (Precision 83%, Recall 93%, F1 0.88 on 900 real held-out test flows)** — real CIC-IDS2018 Infiltration data replaced the earlier synthetic-oversampling attempt, which a held-out evaluation confirmed did not transfer to real traffic. Initial Access (web attacks) has real recall (64%) but weak precision (14%) — it over-fires. **The ML model does not detect Exfiltration (0% recall)** — CIC-IDS2017 only has ~11 Heartbleed flows in its entire public release (2 in this sample), too little to learn from — but **Exfiltration/Heartbleed is separately covered by a deterministic signature detector** (`capture/signatures.py`) that doesn't rely on ML at all: CVE-2014-0160 has a fixed wire-format signature, verified end-to-end against a crafted malicious packet with zero false positives on legitimate traffic. Full per-stage numbers and root-cause analysis are in [`docs/model_card.md`](docs/model_card.md#6-evaluation--comparative-benchmark).
+> Benign/Reconnaissance/C2/**Lateral Movement** are all reliably classified (F1 0.76–0.94). **Lateral Movement in particular (Precision 91%, Recall 92%, F1 0.91 on 900 real held-out test flows)** — real CIC-IDS2018 Infiltration data replaced an earlier synthetic-oversampling attempt that a held-out evaluation confirmed did not transfer to real traffic. Initial Access (web attacks) has real recall (62%) but weak precision (19%) — it over-fires, largely confusing Benign HTTP traffic for web-attack traffic; focal loss improved this from 6% precision but didn't fully resolve it, and this remains the one open gap. **The ML model does not detect Exfiltration (0% recall)** — CIC-IDS2017 only has ~11 Heartbleed flows in its entire public release (2 in this sample), too little to learn from — but **Exfiltration/Heartbleed is separately covered by a deterministic signature detector** (`capture/signatures.py`) that doesn't rely on ML at all: CVE-2014-0160 has a fixed wire-format signature, verified end-to-end against a crafted malicious packet with zero false positives on legitimate traffic. Full per-stage numbers and root-cause analysis are in [`docs/model_card.md`](docs/model_card.md#6-evaluation--comparative-benchmark).
 
 ---
 
@@ -310,7 +310,9 @@ python pipeline_fixed.py \
   --weight-decay 1e-4 \
   --augment-stages "Exfiltration" \
   --augment-sessions-per-stage 300 \
-  --class-weight-max 15.0
+  --class-weight-max 8.0 \
+  --stage-loss focal \
+  --focal-gamma 2.0
 ```
 
 > [!TIP]

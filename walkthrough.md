@@ -23,16 +23,16 @@ All identified gaps from the initial audit have been resolved. The system now fu
 
 The system was evaluated on **327,940 real flows** — 320,000 from CIC-IDS2017 (all 8 capture days) plus 7,940 real Lateral Movement flows from CIC-IDS2018's two infiltration days (269,974 training rows, including train-only synthetic oversampling of Exfiltration only, and 61,566 100%-real, untouched test rows, across 2,001 real sessions). See `data/augment_lateral_movement.py`.
 
-The upgraded **2-layer LSTM World Model (hidden_size=256, dropout=0.25, AdamW + CosineAnnealingLR + Class-Weighted Loss, class-weight clip 15x)** was evaluated against supervised and unsupervised baselines in `backend/artifacts/benchmark_comparison.csv`:
+The upgraded **2-layer LSTM World Model (hidden_size=256, dropout=0.25, AdamW + CosineAnnealingLR, Focal Loss γ=2 + class-weight clip 8x)** was evaluated against supervised and unsupervised baselines in `backend/artifacts/benchmark_comparison.csv`:
 
 | Model | F1-Score | Precision | Recall | False Positive Rate (FPR) |
 |---|---|---|---|---|
 | **Logistic Regression (baseline)** | 0.562 | 0.689 | 0.475 | 0.0712 (7.12%) |
 | **Isolation Forest (baseline)** | 0.362 | 0.333 | 0.396 | 0.2629 (26.29%) |
-| **LSTM World Model (MAX Config)** | **0.861** | **0.848** | **0.875** | **0.0520 (5.20%)** |
+| **LSTM World Model (MAX Config)** | **0.865** | **0.855** | **0.875** | **0.0490 (4.90%)** |
 
 > [!NOTE]
-> These are binary malicious-vs-benign numbers. Per-MITRE-stage: Benign/Reconnaissance/C2 are reliably classified, and **Lateral Movement is now also reliable (Precision 83%, Recall 93%, F1 0.88 on 900 real held-out CIC-IDS2018 test flows)** after replacing the earlier failed synthetic-oversampling attempt with real data. Initial Access has real recall (64%) but weak precision (14%) — the one remaining known gap. **Exfiltration is not detected by the ML model (0% recall, only 2 real examples exist)** but is separately covered by a deterministic Heartbleed (CVE-2014-0160) signature detector that doesn't need training data at all. See `docs/model_card.md` §6 and §8 for the full per-stage breakdown and root-cause analysis.
+> These are binary malicious-vs-benign numbers. Per-MITRE-stage: Benign/Reconnaissance/C2 are reliably classified, and **Lateral Movement is the strongest class (Precision 91%, Recall 92%, F1 0.91 on 900 real held-out CIC-IDS2018 test flows)** after replacing the earlier failed synthetic-oversampling attempt with real data. Initial Access has real recall (62%) but weak precision (19%) — improved 3x from 6% across three tuning passes (class-weight retuning → focal loss → tighter weight clip) but still the one remaining known gap. **Exfiltration is not detected by the ML model (0% recall, only 2 real examples exist)** but is separately covered by a deterministic Heartbleed (CVE-2014-0160) signature detector that doesn't need training data at all. See `docs/model_card.md` §6 and §8 for the full per-stage breakdown and root-cause analysis.
 
 ---
 

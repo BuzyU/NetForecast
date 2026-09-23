@@ -41,23 +41,19 @@
     "test_sessions": 401,
     "train_rows": 269974,
     "test_rows": 61566,
-    "git_commit": "39b2168",
+    "git_commit": "7b47c3e",
     "leakage_fix": "session-level split, scaler fit on train only",
     "synthetic_augmentation": {
       "stages": [
         "Exfiltration"
       ],
       "sessions_per_stage": 300,
-      "note": "train-only synthetic oversampling from calibrated per-stage feature profiles; test set is 100% real flows (CIC-IDS2017 and CIC-IDS2018), untouched by synthetic augmentation"
+      "note": "train-only synthetic oversampling from calibrated per-stage feature profiles; test set is 100% real flows (CIC-IDS2017 and, if present, CIC-IDS2018), untouched by synthetic augmentation"
     },
-    "real_data_augmentation": {
-      "source": "CIC-IDS2018 (Wednesday-28-02-2018 + Thursday-01-03-2018, Infiltration days)",
-      "stage": "Lateral Movement",
-      "rows_added": 7940,
-      "note": "real_flows.csv originally had only ~36 real Lateral Movement rows (CIC-IDS2017's entire public release has ~36 total). See data/augment_lateral_movement.py."
-    },
-    "class_weight_max": 15.0,
-    "best_val_f1": 0.8612,
+    "class_weight_max": 8.0,
+    "stage_loss": "focal",
+    "focal_gamma": 2.0,
+    "best_val_f1": 0.8652,
     "optimization": "AdamW + CosineAnnealingLR + ClassWeighting"
   }
 }

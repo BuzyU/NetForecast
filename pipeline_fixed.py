@@ -321,6 +321,39 @@ class FlowSeqDataset(Dataset):
                 torch.tensor(self.y_mal[idx]), torch.tensor(self.y_stage[idx]))
 
 
+class FocalLoss(nn.Module):
+    """
+    Focal loss (Lin et al., 2017) for the MITRE stage head, generalizing
+    class-weighted cross-entropy: FL(p_t) = -alpha_t * (1 - p_t)^gamma * log(p_t).
+
+    Why: pure inverse-frequency class weighting (the previous approach) blanket-
+    boosts the gradient for rare classes regardless of whether the model is
+    already confident or not, which is what caused Initial Access to over-fire
+    (13.6% precision, drowning out Benign with false positives -- see
+    docs/model_card.md). Focal loss's (1-p_t)^gamma term instead down-weights
+    already-easy/confident examples and concentrates gradient on genuinely hard
+    examples, which should reduce the "confidently wrong" false-positive
+    pattern rather than the "not learned at all" pattern. gamma=0 reduces
+    exactly to the previous weighted CrossEntropyLoss, so this is a strict
+    generalization, not a regression risk.
+    """
+    def __init__(self, alpha: torch.Tensor, gamma: float = 2.0):
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        log_probs = torch.log_softmax(logits, dim=1)
+        log_pt = log_probs.gather(1, targets.unsqueeze(1)).squeeze(1)
+        pt = log_pt.exp()
+        alpha_t = self.alpha[targets]
+        loss = -alpha_t * (1.0 - pt).pow(self.gamma) * log_pt
+        # Match nn.CrossEntropyLoss(weight=..., reduction="mean")'s convention of
+        # dividing by the sum of sample weights, not batch size — otherwise gamma=0
+        # would NOT reduce to weighted_ce's exact loss scale (verified by test).
+        return loss.sum() / alpha_t.sum()
+
+
 class WorldModel(nn.Module):
     def __init__(self, n_features, hidden=128, n_stages=len(STAGES), num_layers=2, dropout=0.2):
         super().__init__()
@@ -422,16 +455,24 @@ def main():
     ap.add_argument("--dropout", type=float, default=0.25, help="Dropout probability")
     ap.add_argument("--lr", type=float, default=1e-3, help="Initial learning rate")
     ap.add_argument("--weight-decay", type=float, default=1e-4, help="AdamW weight decay")
-    ap.add_argument("--augment-stages", default="Lateral Movement,Exfiltration",
+    ap.add_argument("--augment-stages", default="Exfiltration",
                      help="Comma-separated stage names to oversample with synthetic train-only "
-                          "sessions (real_flows.csv has ~36 and ~2 real examples of these — "
-                          "not enough to learn from). Empty string disables augmentation.")
+                          "sessions (real_flows.csv has ~2 real Exfiltration examples — not "
+                          "enough to learn from; Lateral Movement now has real CIC-IDS2018 data "
+                          "instead, see data/augment_lateral_movement.py). Empty string disables.")
     ap.add_argument("--augment-sessions-per-stage", type=int, default=300,
                      help="Synthetic sessions to generate per augmented stage")
     ap.add_argument("--class-weight-max", type=float, default=15.0,
                      help="Upper clip for inverse-frequency class weights (was 50.0 — that "
                           "aggressive a weight was overshooting and collapsing Initial Access "
                           "precision to ~6%%)")
+    ap.add_argument("--stage-loss", choices=["weighted_ce", "focal"], default="focal",
+                     help="Loss for the MITRE stage head. 'focal' (default) generalizes "
+                          "weighted_ce and targets the false-positive over-firing pattern "
+                          "specifically (see FocalLoss docstring); 'weighted_ce' reproduces "
+                          "the previous behavior exactly for comparison.")
+    ap.add_argument("--focal-gamma", type=float, default=2.0,
+                     help="Focusing parameter for --stage-loss focal. 0 reduces to weighted_ce.")
     args = ap.parse_args()
 
     out_dir = args.out
@@ -508,7 +549,10 @@ def main():
     raw_weights = total_samples / (len(STAGES) * np.maximum(stage_counts, 1).astype(np.float32))
     class_weights = np.clip(raw_weights, 0.2, args.class_weight_max)
     stage_weight_t = torch.tensor(class_weights, dtype=torch.float32).to(DEVICE)
-    ce_loss = nn.CrossEntropyLoss(weight=stage_weight_t)
+    if args.stage_loss == "focal":
+        ce_loss = FocalLoss(alpha=stage_weight_t, gamma=args.focal_gamma)
+    else:
+        ce_loss = nn.CrossEntropyLoss(weight=stage_weight_t)
 
     num_pos = np.sum(ym_train == 1)
     num_neg = np.sum(ym_train == 0)
@@ -518,6 +562,7 @@ def main():
     mse_loss = nn.MSELoss()
 
     print(f"Class weighting enabled: stage_weights={np.round(class_weights, 2)}, pos_weight={pos_weight_val:.2f}", flush=True)
+    print(f"Stage loss: {args.stage_loss}" + (f" (gamma={args.focal_gamma})" if args.stage_loss == "focal" else ""), flush=True)
 
     # ── MODEL & OPTIMIZER ─────────────────────────────────────────────
     model = WorldModel(
@@ -658,6 +703,8 @@ def main():
                             "and, if present, CIC-IDS2018), untouched by synthetic augmentation",
                 },
                 "class_weight_max": args.class_weight_max,
+                "stage_loss": args.stage_loss,
+                "focal_gamma": args.focal_gamma if args.stage_loss == "focal" else None,
                 "best_val_f1": best_val_f1,
                 "optimization": "AdamW + CosineAnnealingLR + ClassWeighting",
             }
