@@ -37,12 +37,14 @@
   "lstm_dropout": 0.25,
   "provenance": {
     "trained_on": "real_flows.csv",
-    "train_sessions": 1600,
+    "train_sessions": 1400,
+    "val_sessions": 200,
     "test_sessions": 401,
-    "train_rows": 269974,
+    "train_rows": 234750,
+    "val_rows": 35224,
     "test_rows": 61566,
-    "git_commit": "7b47c3e",
-    "leakage_fix": "session-level split, scaler fit on train only",
+    "git_commit": "afe98b9",
+    "leakage_fix": "session-level 3-way train/val/test split, scaler fit on train only, checkpoint selection uses val (never test) -- test set is byte-identical across every model version in this project's history (see three_way_split() docstring)",
     "synthetic_augmentation": {
       "stages": [
         "Exfiltration"
@@ -53,7 +55,7 @@
     "class_weight_max": 8.0,
     "stage_loss": "focal",
     "focal_gamma": 2.0,
-    "best_val_f1": 0.8652,
+    "best_val_f1": 0.8481,
     "optimization": "AdamW + CosineAnnealingLR + ClassWeighting"
   }
 }

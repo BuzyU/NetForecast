@@ -59,11 +59,11 @@ NetForecast outperforms both traditional supervised classifiers and unsupervised
 
 | Model | Technique | F1-Score | Precision | Recall | False Positive Rate (FPR) |
 |---|---|---|---|---|---|
-| **Logistic Regression** | Shallow Linear Baseline | 0.562 | 0.689 | 0.475 | 0.071 |
-| **Isolation Forest** | Unsupervised Anomaly Detection | 0.362 | 0.333 | 0.396 | 0.263 |
-| **NetForecast (World Model)** | 2-Layer LSTM + Multi-Head Rollout, Focal Loss | **0.865** | **0.855** | **0.875** | **0.049** |
+| **Logistic Regression** | Shallow Linear Baseline | 0.558 | 0.696 | 0.465 | 0.067 |
+| **Isolation Forest** | Unsupervised Anomaly Detection | 0.313 | 0.287 | 0.343 | 0.282 |
+| **NetForecast (World Model)** | 2-Layer LSTM + Multi-Head Rollout, Focal Loss | **0.859** | **0.849** | **0.870** | **0.052** |
 
-> Binary malicious-vs-benign detection on held-out real test sessions from CIC-IDS2017 + CIC-IDS2018 (`backend/artifacts/benchmark_comparison.csv`). Per-stage: Benign/Reconnaissance/C2/**Lateral Movement** are all reliable — Lateral Movement is the strongest class (F1 0.91) after fixing it with real CIC-IDS2018 data (see `docs/model_card.md` §6). Initial Access over-alerts (19% precision, up 3x from 6% after tuning) — the one remaining known gap. Exfiltration isn't caught by the ML model at all (only 2 real examples exist) but is covered by a separate deterministic Heartbleed signature detector instead.
+> Binary malicious-vs-benign detection on a held-out real test set from CIC-IDS2017 + CIC-IDS2018, using a proper 3-way train/val/test split so checkpoint selection never touches the reported test data (`backend/artifacts/benchmark_comparison.csv`). Per-stage: Benign/Reconnaissance/C2/**Lateral Movement** are all reliable — Lateral Movement (F1 0.81) after fixing it with real CIC-IDS2018 data (see `docs/model_card.md` §6). Initial Access over-alerts (17% precision, up from 6% after tuning) — the one remaining known gap. Exfiltration isn't caught by the ML model at all (only 2 real examples exist) but is covered by a separate deterministic Heartbleed signature detector instead.
 
 #### Interpretable Decision Support:
 - **SHAP (KernelExplainer)**: Calculates exact Shapley values to identify which of the 22 telemetry features pushed the model toward predicting malicious compromise.

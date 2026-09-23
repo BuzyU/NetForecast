@@ -92,6 +92,32 @@ def train_test_split(unique_ids, test_size=0.2, random_state=42):
     return shuffled[:split], shuffled[split:]
 
 
+def three_way_split(unique_ids, val_size=0.1, test_size=0.2, random_state=42):
+    """
+    Split session IDs into train/val/test with ONE deterministic permutation.
+
+    Why this exists: the original pipeline picked its "best" checkpoint by
+    evaluating on the same set it then reported final metrics on (test_loader
+    was used for both). That's checkpoint selection leakage -- the reported
+    number is optimistically biased toward whichever epoch happened to do
+    best on the exact data being reported on, not a genuinely unseen set.
+
+    The test boundary here is computed identically to train_test_split()
+    above (same RNG, same permutation, same `int(n * (1-test_size))` cut),
+    so the resulting test_ids are byte-identical to every prior run's test
+    set -- the held-out set used for every benchmark number in this project's
+    history doesn't change, only the train/val boundary does (val is carved
+    out of what used to be "train"). This keeps all prior per-stage
+    evaluations in docs/model_card.md directly comparable to this one.
+    """
+    rng = np.random.RandomState(random_state)
+    shuffled = rng.permutation(unique_ids)
+    n = len(shuffled)
+    test_start = int(n * (1 - test_size))
+    val_start = int(n * (1 - test_size - val_size))
+    return shuffled[:val_start], shuffled[val_start:test_start], shuffled[test_start:]
+
+
 def compute_metrics(y_true, y_pred):
     y_t = np.asarray(y_true, dtype=int)
     y_p = np.asarray(y_pred, dtype=int)
@@ -494,15 +520,22 @@ def main():
     print(f"Dataset shape: {df.shape}", flush=True)
 
     # ── LEAKAGE FIX 1: split by session_id BEFORE scaling ──────────────
+    # LEAKAGE FIX 2: three-way split so checkpoint selection (val) and final
+    # reporting (test) never touch the same data -- see three_way_split() docstring.
     unique_sids = df["session_id"].unique()
-    train_sids, test_sids = train_test_split(unique_sids, test_size=0.2, random_state=SEED)
+    train_sids, val_sids, test_sids = three_way_split(
+        unique_sids, val_size=0.1, test_size=0.2, random_state=SEED
+    )
     train_mask = df["session_id"].isin(train_sids)
+    val_mask = df["session_id"].isin(val_sids)
+    test_mask = df["session_id"].isin(test_sids)
     train_df = df[train_mask].copy()
-    test_df  = df[~train_mask].copy()
+    val_df = df[val_mask].copy()
+    test_df = df[test_mask].copy()
 
     # ── Synthetic oversampling of stages real_flows.csv can't teach from ──
     # Applied to train_df only, strictly AFTER the session split, so the held-out
-    # test set stays 100% real and evaluation numbers stay honest.
+    # val/test sets stay 100% real and evaluation numbers stay honest.
     augment_stages = [s.strip() for s in args.augment_stages.split(",") if s.strip()]
     if augment_stages:
         synth_df = augment_rare_stages(augment_stages, n_sessions_per_stage=args.augment_sessions_per_stage)
@@ -511,17 +544,21 @@ def main():
 
     scaler = StandardScaler()
     train_df[FLOW_FEATURES] = scaler.fit_transform(train_df[FLOW_FEATURES])   # fit on train only
+    val_df[FLOW_FEATURES]   = scaler.transform(val_df[FLOW_FEATURES])         # transform only
     test_df[FLOW_FEATURES]  = scaler.transform(test_df[FLOW_FEATURES])        # transform only
 
     train_df["stage_id"] = train_df["stage_label"].map(STAGE2ID)
+    val_df["stage_id"]   = val_df["stage_label"].map(STAGE2ID)
     test_df["stage_id"]  = test_df["stage_label"].map(STAGE2ID)
 
     train_sorted = train_df.sort_values(["session_id", "timestamp"]).reset_index(drop=True)
+    val_sorted   = val_df.sort_values(["session_id", "timestamp"]).reset_index(drop=True)
     test_sorted  = test_df.sort_values(["session_id", "timestamp"]).reset_index(drop=True)
 
     X_train, yn_train, ym_train, ys_train = build_sequences(train_sorted)
+    X_val,   yn_val,   ym_val,   ys_val   = build_sequences(val_sorted)
     X_test,  yn_test,  ym_test,  ys_test  = build_sequences(test_sorted)
-    print(f"Train sequences: {X_train.shape}  Test sequences: {X_test.shape}", flush=True)
+    print(f"Train sequences: {X_train.shape}  Val sequences: {X_val.shape}  Test sequences: {X_test.shape}", flush=True)
 
     X_train_flat = X_train.reshape(X_train.shape[0], -1)
     X_test_flat = X_test.reshape(X_test.shape[0], -1)
@@ -541,6 +578,7 @@ def main():
     print("ISOLATION FOREST BASELINE:", iso_metrics, flush=True)
 
     train_loader = DataLoader(FlowSeqDataset(X_train, yn_train, ym_train, ys_train), batch_size=args.batch_size, shuffle=True)
+    val_loader = DataLoader(FlowSeqDataset(X_val, yn_val, ym_val, ys_val), batch_size=args.batch_size, shuffle=False)
     test_loader = DataLoader(FlowSeqDataset(X_test, yn_test, ym_test, ys_test), batch_size=args.batch_size, shuffle=False)
 
     # ── CLASS-WEIGHTED LOSS (Maximizes Recall on Rare Attack Stages) ───
@@ -594,11 +632,14 @@ def main():
 
         epoch_loss = total_loss / len(train_loader.dataset)
 
-        # Validation at epoch end
+        # Validation at epoch end — uses val_loader, NEVER test_loader. Checkpoint
+        # selection on the same set you report final numbers on is leakage: the
+        # reported score becomes optimistically biased toward whichever epoch
+        # happened to do best on that exact held-out data.
         model.eval()
         val_preds, val_true = [], []
         with torch.no_grad():
-            for xb, _yn_b, ym_b, _ys_b in test_loader:
+            for xb, _yn_b, ym_b, _ys_b in val_loader:
                 _, inf_logit, _ = model(xb.to(DEVICE))
                 probs = torch.sigmoid(inf_logit).cpu().numpy()
                 val_preds.extend((probs > 0.5).astype(int))
@@ -626,7 +667,9 @@ def main():
         print(f"\nLoading best checkpoint with validation F1: {best_val_f1:.4f}", flush=True)
         model.load_state_dict(best_model_state)
 
-    # Final evaluation with best model
+    # Final evaluation with best model — test_loader has NEVER been used for
+    # checkpoint selection or any decision above; this is its only use in the
+    # entire script, exactly once, after the model is fully fixed.
     model.eval()
     all_preds, all_true = [], []
     with torch.no_grad():
@@ -690,11 +733,16 @@ def main():
             "provenance": {
                 "trained_on": data_source,
                 "train_sessions": int(len(train_sids)),
+                "val_sessions": int(len(val_sids)),
                 "test_sessions": int(len(test_sids)),
                 "train_rows": int(len(train_df)),
+                "val_rows": int(len(val_df)),
                 "test_rows": int(len(test_df)),
                 "git_commit": git_commit,
-                "leakage_fix": "session-level split, scaler fit on train only",
+                "leakage_fix": "session-level 3-way train/val/test split, scaler fit on "
+                               "train only, checkpoint selection uses val (never test) -- "
+                               "test set is byte-identical across every model version in "
+                               "this project's history (see three_way_split() docstring)",
                 "synthetic_augmentation": {
                     "stages": augment_stages,
                     "sessions_per_stage": args.augment_sessions_per_stage if augment_stages else 0,
