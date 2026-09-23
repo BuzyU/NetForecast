@@ -2,6 +2,7 @@
 Model loader — loads world_model.pt, scaler.pkl, config.json at startup.
 Fails loudly if anything is wrong. No silent fallbacks.
 """
+import hashlib
 import json
 import logging
 import pickle
@@ -89,6 +90,9 @@ class ModelArtifacts:
         self.config: dict | None = None
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self._loaded = False
+        self.model_version: str = "1.0.0"
+        self.model_hash: str | None = None
+        self.scaler_hash: str | None = None
         # Cache scaler mean for SHAP background
         self._scaler_mean: np.ndarray | None = None
 
@@ -177,8 +181,20 @@ class ModelArtifacts:
         assert stage_logits.shape == (1, N_STAGES), \
             f"stage head shape {stage_logits.shape}, expected (1, {N_STAGES})"
 
-        logger.info("  world_model.pt: OK (hidden=%d, layers=%d, dropout=%.2f)",
-                     HIDDEN_SIZE, NUM_LSTM_LAYERS, LSTM_DROPOUT)
+        # ── Provenance & integrity: compute content hashes ────────────
+        def _hash_file(p):
+            h = hashlib.sha256()
+            with open(p, "rb") as fp:
+                while chunk := fp.read(65536):
+                    h.update(chunk)
+            return h.hexdigest()[:16]
+
+        self.model_hash = _hash_file(MODEL_PATH)
+        self.scaler_hash = _hash_file(SCALER_PATH)
+        self.model_version = self.config.get("version", "1.0.0")
+
+        logger.info("  world_model.pt: OK (hidden=%d, layers=%d, dropout=%.2f, sha256=%s)",
+                     HIDDEN_SIZE, NUM_LSTM_LAYERS, LSTM_DROPOUT, self.model_hash)
         self._loaded = True
         logger.info("All artifacts loaded successfully on device=%s", self.device)
 

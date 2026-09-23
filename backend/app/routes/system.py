@@ -207,8 +207,25 @@ ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class CycleState:
-    cycle_id: str = datetime.now(timezone.utc).strftime("cycle_%Y%m%d_%H%M%S")
+    cycle_id: str = ""
     started_at: datetime = datetime.now(timezone.utc)
+    _initialized: bool = False
+
+    @classmethod
+    def ensure_initialized(cls) -> None:
+        """Ensure cycle state is initialized if accessed outside lifespan."""
+        if not cls._initialized or not cls.cycle_id:
+            cls.initialize()
+
+    @classmethod
+    def initialize(cls, force: bool = False) -> str:
+        """Explicitly initialize or reset monitoring cycle."""
+        if not cls._initialized or force or not cls.cycle_id:
+            now = datetime.now(timezone.utc)
+            cls.cycle_id = now.strftime("cycle_%Y%m%d_%H%M%S")
+            cls.started_at = now
+            cls._initialized = True
+        return cls.cycle_id
 
 
 def _compute_wellbeing_score(total_flows: int, alerts: list, max_stage: str) -> float:
@@ -258,6 +275,7 @@ async def archive_and_reset_cycle(db: AsyncSession, reason: str = "manual") -> d
     from ..ingestion import _session_buffers
 
     now = datetime.now(timezone.utc)
+    CycleState.ensure_initialized()
     archive_id = CycleState.cycle_id
 
     # 1. Fetch current sessions
@@ -358,9 +376,7 @@ async def archive_and_reset_cycle(db: AsyncSession, reason: str = "manual") -> d
     _session_buffers.clear()
 
     # Start new cycle
-    new_cycle_id = now.strftime("cycle_%Y%m%d_%H%M%S")
-    CycleState.cycle_id = new_cycle_id
-    CycleState.started_at = now
+    new_cycle_id = CycleState.initialize(force=True)
 
     logger.info("Initialized fresh cycle: %s", new_cycle_id)
     return {
@@ -386,6 +402,7 @@ async def start_new_cycle(db: AsyncSession = Depends(get_db)):
 @router.get("/cycle/current")
 async def get_current_cycle():
     """Get active cycle metadata."""
+    CycleState.ensure_initialized()
     return {
         "cycle_id": CycleState.cycle_id,
         "started_at": CycleState.started_at.isoformat(),

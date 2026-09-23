@@ -2,17 +2,24 @@
 Real inference tests — runs actual model predictions on known windows.
 This is your "does it actually work" proof for judges.
 """
-import sys
 import os
+import sys
+
 import numpy as np
 import pytest
 
 # Add backend to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from app.model_loader import artifacts, WorldModel
-from app.config import WINDOW_SIZE, N_FEATURES, STAGES, N_STAGES, HIDDEN_SIZE, NUM_LSTM_LAYERS
-from app.inference import predict_single, forecast_rollout, explain_window, explain_window_shap, ema_smooth
+from app.config import HIDDEN_SIZE, N_FEATURES, N_STAGES, NUM_LSTM_LAYERS, STAGES, WINDOW_SIZE
+from app.inference import (
+    ema_smooth,
+    explain_window,
+    explain_window_shap,
+    forecast_rollout,
+    predict_single,
+)
+from app.model_loader import WorldModel, artifacts
 
 
 @pytest.fixture(scope="module", autouse=True)

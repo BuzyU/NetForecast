@@ -4,7 +4,6 @@ Downloads the 8 official CIC-IDS2017 CSV files from Hugging Face mirror
 into data/raw_cicids/ with streaming and progress reporting.
 """
 
-import os
 import sys
 import time
 import urllib.request
@@ -58,7 +57,7 @@ def download_file(filename: str, dest_dir: Path, idx: int, total: int):
                     break
                 out_f.write(chunk)
                 downloaded += len(chunk)
-                
+
                 # Print progress every 1.5 seconds
                 now = time.time()
                 if now - last_print > 1.5 or downloaded == total_bytes:

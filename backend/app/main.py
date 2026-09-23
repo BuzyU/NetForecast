@@ -53,9 +53,18 @@ async def lifespan(app: FastAPI):
     await init_db()
     await _migrate_db()
 
-    # Preserve active session and cycle data across hot-reloads and window switches
+    # Explicitly initialize or preserve active session and cycle data
     from .routes.system import CycleState
-    logger.info("Active monitoring cycle preserved: %s (started %s)", CycleState.cycle_id, CycleState.started_at.isoformat())
+    CycleState.initialize()
+    logger.info("Active monitoring cycle initialized: %s (started %s)", CycleState.cycle_id, CycleState.started_at.isoformat())
+
+    if not API_KEY:
+        logger.warning("=" * 60)
+        logger.warning("SECURITY NOTICE: API_KEY is not configured in environment.")
+        logger.warning("Running in unauthenticated evaluation mode. For production, set API_KEY.")
+        logger.warning("=" * 60)
+    else:
+        logger.info("Security: API_KEY enforcement active.")
 
     logger.info("=" * 60)
     logger.info("Service ready — all systems operational")
@@ -193,6 +202,9 @@ async def health_check():
         stages=STAGES,
         device=str(artifacts.device) if model_ok else "unavailable",
         system_mode=SystemState.mode,
+        model_version=artifacts.model_version if model_ok else None,
+        model_hash=artifacts.model_hash if model_ok else None,
+        scaler_hash=artifacts.scaler_hash if model_ok else None,
     )
 
 

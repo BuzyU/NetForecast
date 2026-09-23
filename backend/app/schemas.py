@@ -4,10 +4,11 @@ Every endpoint has explicit types — no untyped dicts flying around.
 """
 from __future__ import annotations
 
+import ipaddress
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .config import (
     DEFAULT_K_STEPS,
@@ -61,6 +62,38 @@ class FlowRecord(BaseModel):
         default="api",
         description='Origin of this flow: "live_capture", "simulated", "csv_upload", or "api"',
     )
+
+    @field_validator("src_ip", "dst_ip")
+    @classmethod
+    def validate_ip_address(cls, v: Optional[str]) -> Optional[str]:
+        """
+        Validate IPv4 / IPv6 addresses while safely permitting legitimate
+        telemetry placeholder tokens ('unknown', 'localhost', '?', None).
+        """
+        if v is None:
+            return None
+        val = str(v).strip()
+        if not val:
+            return None
+        # Explicit allowlist of non-IP placeholders used in telemetry & session grouping
+        if val.lower() in ("unknown", "?", "—", "-", "none", "null", "localhost", "broadcast"):
+            return val
+
+        # Handle bracketed IPv6 e.g. "[2001:db8::1]:8080" or "[::1]"
+        if val.startswith("[") and "]" in val:
+            val = val[1:val.index("]")]
+        # Handle trailing port on IPv4 e.g. "192.168.1.1:80"
+        elif ":" in val and val.count(":") == 1:
+            val = val.split(":")[0]
+
+        try:
+            ipaddress.ip_address(val)
+        except ValueError:
+            raise ValueError(
+                f"Invalid IP address format: '{val}'. Must be a valid IPv4, IPv6, "
+                f"or supported placeholder ('unknown', 'localhost')."
+            )
+        return val
 
     def to_feature_array(self) -> list[float]:
         """Extract the 22 features in the correct order."""
@@ -182,11 +215,17 @@ class AlertOut(BaseModel):
     created_at: datetime
     acknowledged: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ── Ingest response ──────────────────────────────────────────────────
+class SingleFlowIngestResponse(BaseModel):
+    session_key: str
+    buffer_size: int
+    prediction: Optional[dict] = None
+    alert: Optional[dict] = None
+
+
 class IngestResponse(BaseModel):
     flows_accepted: int
     flows_rejected: int
@@ -205,6 +244,9 @@ class HealthResponse(BaseModel):
     stages: list[str]
     device: str
     system_mode: Optional[str] = "live"
+    model_version: Optional[str] = "1.0.0"
+    model_hash: Optional[str] = None
+    scaler_hash: Optional[str] = None
 
 
 # ── WebSocket messages ───────────────────────────────────────────────

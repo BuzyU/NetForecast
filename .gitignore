@@ -40,3 +40,4 @@ data/*.pcap
 data/*.pcapng
 *.tmp
 scratch/
+scratch_prompt.txt

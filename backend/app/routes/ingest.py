@@ -13,13 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import FLOW_FEATURES
 from ..database import get_db
 from ..ingestion import get_buffer_status, ingest_single_flow
-from ..schemas import FlowRecord, IngestResponse
+from ..schemas import FlowRecord, IngestResponse, SingleFlowIngestResponse
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/ingest", response_model=dict)
+@router.post("/ingest", response_model=SingleFlowIngestResponse)
 async def ingest_flow(
     flow: FlowRecord,
     db: AsyncSession = Depends(get_db),

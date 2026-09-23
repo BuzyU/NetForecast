@@ -150,16 +150,11 @@ async def dashboard_stats(db: AsyncSession = Depends(get_db)):
     )
     has_simulated = (SystemState.mode == "simulated") and ((sim_count.scalar() or 0) > 0)
 
-    # Direction breakdown
-    inbound_count = await db.execute(
-        select(func.count(SessionDB.id)).where(SessionDB.direction == "inbound")
+    # Direction breakdown — consolidated in a single query with group_by
+    dir_rows = await db.execute(
+        select(SessionDB.direction, func.count(SessionDB.id)).group_by(SessionDB.direction)
     )
-    outbound_count = await db.execute(
-        select(func.count(SessionDB.id)).where(SessionDB.direction == "outbound")
-    )
-    internal_count = await db.execute(
-        select(func.count(SessionDB.id)).where(SessionDB.direction == "internal")
-    )
+    dir_map = {row[0]: row[1] for row in dir_rows.all() if row[0]}
 
     return {
         "total_sessions": total_sessions.scalar() or 0,
@@ -167,9 +162,9 @@ async def dashboard_stats(db: AsyncSession = Depends(get_db)):
         "at_risk_sessions": active_alerts.scalar() or 0,
         "has_simulated_data": has_simulated,
         "direction_breakdown": {
-            "inbound": inbound_count.scalar() or 0,
-            "outbound": outbound_count.scalar() or 0,
-            "internal": internal_count.scalar() or 0,
+            "inbound": dir_map.get("inbound", 0),
+            "outbound": dir_map.get("outbound", 0),
+            "internal": dir_map.get("internal", 0),
         },
     }
 

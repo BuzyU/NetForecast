@@ -16,8 +16,8 @@ Usage:
 import argparse
 import json
 import random
-import time
 import sys
+import time
 from datetime import datetime, timezone
 
 # Prevent Windows cp1252 console encoding crashes
@@ -28,8 +28,8 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-import requests
 import numpy as np
+import requests
 
 # ── CIC-IDS flow feature profiles per MITRE stage ────────────────────
 # These are based on the statistical distributions observed in CIC-IDS2017/2018
@@ -223,7 +223,7 @@ def run_attack_scenario(api_url: str, speed: float, session_count: int):
     - Some sessions progress through the kill chain
     """
     print(f"\n{'='*60}")
-    print(f"  Network Attack Traffic Simulator")
+    print("  Network Attack Traffic Simulator")
     print(f"  Target: {api_url}")
     print(f"  Sessions: {session_count}")
     print(f"  Speed: {speed}s between flows")
@@ -261,7 +261,7 @@ def run_attack_scenario(api_url: str, speed: float, session_count: int):
     total_alerts = 0
 
     try:
-        for step in range(max_steps):
+        for _step in range(max_steps):
             for session in sessions:
                 if session["current_step"] >= len(session["stages"]):
                     continue
@@ -308,7 +308,7 @@ def run_attack_scenario(api_url: str, speed: float, session_count: int):
                     print(f"  ERROR: Cannot connect to {api_url} — is the backend running?")
                     sys.exit(1)
                 except requests.exceptions.Timeout:
-                    print(f"  WARNING: Request timed out")
+                    print("  WARNING: Request timed out")
 
                 session["current_step"] += 1
 
@@ -318,7 +318,7 @@ def run_attack_scenario(api_url: str, speed: float, session_count: int):
         print("\n\nSimulation stopped by user.")
 
     print(f"\n{'='*60}")
-    print(f"  Simulation complete")
+    print("  Simulation complete")
     print(f"  Total flows sent: {total_sent}")
     print(f"  Total alerts triggered: {total_alerts}")
     print(f"{'='*60}\n")

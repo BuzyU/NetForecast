@@ -6,11 +6,27 @@ paths, deterministic tie-breaks, curated demo sample.
 Run as: python pipeline.py           (uses synthetic fallback)
         python pipeline.py --data path/to/real_flows.csv
 """
-import os, json, random, argparse, subprocess, sys, copy
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(line_buffering=True)
+import argparse
+import copy
+import json
+import os
+import pickle
+import random
+import subprocess
+import sys
+
+import matplotlib
 import numpy as np
 import pandas as pd
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, Dataset
+
+matplotlib.use("Agg")
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(line_buffering=True)
+
 
 # ---- FIX 1: no get_ipython() — real subprocess install guard instead ----
 def ensure_packages():
@@ -21,19 +37,14 @@ def ensure_packages():
         except ImportError:
             subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", pkg])
 
+
 if __name__ == "__main__" and os.environ.get("SKIP_INSTALL") != "1":
     ensure_packages()
 
-import torch
-import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import pickle
-
 SEED = 42
-random.seed(SEED); np.random.seed(SEED); torch.manual_seed(SEED)
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
 os.environ["PYTHONHASHSEED"] = "0"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -244,7 +255,7 @@ def generate_synthetic_flows(n_sessions=400, session_len=30):
 
 def build_sequences(df, window=WINDOW):
     X_seq, y_next_state, y_malicious, y_stage = [], [], [], []
-    for sid, g in df.groupby("session_id"):
+    for _sid, g in df.groupby("session_id"):
         feats = g[FLOW_FEATURES].values
         mal = g["is_malicious"].values
         stage = g["stage_id"].values
@@ -479,7 +490,7 @@ def main():
         model.eval()
         val_preds, val_true = [], []
         with torch.no_grad():
-            for xb, yn_b, ym_b, ys_b in test_loader:
+            for xb, _yn_b, ym_b, _ys_b in test_loader:
                 _, inf_logit, _ = model(xb.to(DEVICE))
                 probs = torch.sigmoid(inf_logit).cpu().numpy()
                 val_preds.extend((probs > 0.5).astype(int))
@@ -511,7 +522,7 @@ def main():
     model.eval()
     all_preds, all_true = [], []
     with torch.no_grad():
-        for xb, yn_b, ym_b, ys_b in test_loader:
+        for xb, _yn_b, ym_b, _ys_b in test_loader:
             _, inf_logit, _ = model(xb.to(DEVICE))
             probs = torch.sigmoid(inf_logit).cpu().numpy()
             all_preds.extend((probs > 0.5).astype(int))

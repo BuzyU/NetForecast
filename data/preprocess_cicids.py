@@ -14,13 +14,14 @@ Usage:
 The output CSV is ready for:
   python pipeline_fixed.py --data real_flows.csv --out ./backend/artifacts --epochs 15
 """
-import os
-import sys
 import argparse
-from typing import Optional
-import pandas as pd
-import numpy as np
+import sys
 from pathlib import Path
+from typing import Optional
+
+import numpy as np
+import pandas as pd
+
 
 # ── Label mapping: CIC-IDS2017 → 6-stage MITRE taxonomy ──────
 def map_label(raw_label: str) -> Optional[str]:
@@ -269,17 +270,17 @@ def main():
     combined = combined.sort_values(["session_id", "timestamp"]).reset_index(drop=True)
 
     print("=" * 70)
-    print(f"PREPROCESSING COMPLETE:")
+    print("PREPROCESSING COMPLETE:")
     print(f"Total rows:     {len(combined):,}")
     print(f"Total sessions: {combined['session_id'].nunique():,}")
-    print(f"Stage distribution:")
+    print("Stage distribution:")
     for stage, count in combined["stage_label"].value_counts().items():
         print(f"  - {stage:<18}: {count:>8,} ({count/len(combined)*100:>5.2f}%)")
     print("=" * 70)
 
     combined.to_csv(args.output, index=False)
     print(f"Saved preprocessed dataset to: {args.output}")
-    print(f"\nReady to train World Model:")
+    print("\nReady to train World Model:")
     print(f"  python pipeline_fixed.py --data {args.output} --out ./backend/artifacts --epochs 15")
 
 

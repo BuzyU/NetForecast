@@ -179,13 +179,78 @@ npm run dev
 ```
 - Analyst Dashboard: [http://localhost:5173](http://localhost:5173)
 
-#### 3. Run Live Traffic Simulation (No VMs Required)
+---
+
+### Option C: Containerized Deployment (Docker Compose)
+
+Spin up the entire stack (FastAPI backend + Vite/Nginx frontend + shared volume) with a single command:
+
 ```bash
-# Injects simulated multi-stage attack kill-chains into the live backend
-python demo/traffic_simulator.py --api http://localhost:8000 --sessions 4 --speed 1
+# Build and start all services
+docker compose up --build -d
+
+# Inspect running services
+docker compose ps
+
+# View backend logs
+docker compose logs -f backend
+```
+- Frontend Dashboard: [http://localhost:5173](http://localhost:5173)
+- FastAPI Backend: [http://localhost:8000](http://localhost:8000)
+
+---
+
+## ⚙️ Configuration & Environment Variables
+
+Copy `.env.example` to `.env` to customize runtime parameters:
+
+```bash
+cp .env.example .env
+```
+
+| Variable | Default Value | Description |
+|---|---|---|
+| `ARTIFACTS_DIR` | `./backend/artifacts` | Path to serialized model weights, scaler, and config |
+| `DB_DIR` | `./backend/data` | SQLite database directory (`forecaster.db`) |
+| `ALERT_THRESHOLD` | `0.5` | Baseline probability threshold for attack alerts |
+| `ADAPTIVE_THRESHOLD` | `1` | Enable dynamic baseline ($\bar{p} + 2\sigma$) thresholding |
+| `API_KEY` | *(None / Empty)* | Optional header authentication (`X-API-Key`). Unset = Demo Mode |
+| `FRONTEND_URL` | `http://localhost:5173` | Allowed CORS origins (comma-separated for multi-origin) |
+
+---
+
+## 🧪 Running Automated Tests
+
+Run the full backend test suite to verify inference, world model rollout, and explainability:
+
+```bash
+# Run all backend tests
+backend/venv/Scripts/python.exe -m pytest backend/tests -v
+
+# Run inference and forecast unit tests specifically
+backend/venv/Scripts/python.exe -m pytest backend/tests/test_inference.py -v
 ```
 
 ---
+
+## 🎬 How to Demo (SIH 2026 Evaluation Flow)
+
+Follow this 5-stage workflow for live judge demonstrations:
+
+```
+[1. Simulator Mode] ──> [2. Observe Forecasting] ──> [3. Switch Live NIC] ──> [4. Purge Simulated] ──> [5. Archive Cycle]
+```
+
+1. **Launch in Simulator Mode:**  
+   Execute `powershell -File .\start_all.ps1 -Mode simulator`. This launches both servers and immediately starts `demo/traffic_simulator.py` injecting realistic multi-session attacks across all 6 MITRE stages.
+2. **Demonstrate Forecasting vs. Detection:**  
+   In the SOC Dashboard, show a session progressing through `Reconnaissance` $\to$ `Initial Access`. Highlight the **$k$-Step Monte Carlo Forecast** panel to show the model projecting state vectors into the future and predicting an impending transition to `Lateral Movement` or `C2` *before* the attack packets occur.
+3. **Inspect Dual Explainability:**  
+   Click the **Explain** tab on an active alert. Toggle between **SHAP** (Shapley game-theoretic attributions) and **Gradient $\times$ Input** attributions to demonstrate to judges which flow features (e.g., `down_up_ratio`, `pkt_size_avg`, `rst_flag_cnt`) triggered the risk score.
+4. **Demonstrate Live Mode & Purge:**  
+   Switch the system mode to live via the UI or API (`POST /system/mode`). Click **"Purge Simulated Data"** (`POST /system/purge-simulated`) to wipe synthetic demo flows from the operational database while preserving genuine live traffic.
+5. **Cycle Reset & Archive:**  
+   Show the non-destructive telemetry cycle system: trigger **Archive Cycle** (`POST /cycle/reset`), which snaps the current state into historical archives (`/cycle/archives`) and starts a fresh monitoring session without restarting the server.
 
 ## 📡 Live Traffic & PCAP Ingestion
 
@@ -336,15 +401,19 @@ Network_Attack_Detection/
 
 ---
 
-## 🛡️ SIH 2026 Compliance Checklist (Problem Statement ID 26153)
+## ⚠️ Known Limitations & Enterprise Architecture Roadmap
 
-- [x] **Network State Representation:** 22 temporal and volumetric flow features per timestep.
-- [x] **State-Transition Dynamics:** 2-layer stacked LSTM (hidden=256) learning $P(s_{t+1} \mid s_t)$.
-- [x] **Future State Forecasting:** Multi-step autoregressive rollout ($k=6$) with Monte Carlo confidence intervals.
-- [x] **MITRE ATT&CK Mapping:** Explicit 6-stage kill-chain classification and tracking.
-- [x] **Interpretable Decision Support:** Dual SHAP (KernelExplainer) and Gradient feature attributions.
-- [x] **Enterprise Readiness:** Scapy PCAP ingestion, live NIC sniffing, forensic report exports (CSV/JSON), and rate-limited API.
-- [x] **Rigorous Benchmarking:** Evaluated against Logistic Regression and Isolation Forest on 320,000 real CIC-IDS2017 flows.
+For national-scale deployment or production CII (Critical Information Infrastructure) environments, the following architectural choices were made for the prototype/demonstration and map directly to production upgrades:
+
+1. **Embedded Datastore (SQLite + WAL Mode):**  
+   - *Current State:* Asynchronous SQLite (`sqlite+aiosqlite`) is used for the hackathon prototype to provide a self-contained, zero-external-dependency deployment without requiring a local PostgreSQL service.
+   - *Production Roadmap:* In 10Gbps+ enterprise perimeters, the database layer transitions to a distributed time-series datastore such as **TimescaleDB** or **ClickHouse** with Kafka ingestion buffering to handle millions of flows/sec.
+2. **Local Transport Security (HTTP/WS):**  
+   - *Current State:* Plaintext HTTP and WebSocket (`ws://`) are configured for local development and offline evaluator sandbox testing.
+   - *Production Roadmap:* In production perimeters, an Nginx or Traefik reverse proxy handles **TLS 1.3 / mTLS** termination with strict HSTS headers and secure WebSockets (`wss://`).
+3. **Capture Privileges:**  
+   - *Current State:* Windows native raw socket packet capture requires Administrator elevation (`RunAs`).
+   - *Production Roadmap:* In production appliances, packet capture runs as a dedicated Linux system daemon leveraging **eBPF / AF_XDP** or **DPDK** ring buffers with minimal Linux capabilities (`CAP_NET_RAW`, `CAP_NET_ADMIN`).
 
 ---
 
