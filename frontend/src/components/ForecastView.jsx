@@ -8,9 +8,10 @@ import { apiFetch, apiPost } from '../api';
 import {
   stageClass, stageColor, formatTime, formatProb,
   formatDuration,
+  DEFAULT_FEAT_ORDER,
 } from '../utils';
 import {
-  DEFAULT_FEAT_ORDER, DirBadge, SourceBadge,
+  DirBadge, SourceBadge,
   CompromiseIndicator, KillChain,
 } from './Badges';
 

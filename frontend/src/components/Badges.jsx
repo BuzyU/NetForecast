@@ -5,17 +5,7 @@ import {
 } from 'lucide-react';
 import { apiFetch } from '../api';
 import { stageIndex, formatTime, STAGES } from '../utils';
-
-export const DEFAULT_FEAT_ORDER = [
-  'flow_duration', 'tot_fwd_pkts', 'tot_bwd_pkts', 'fwd_pkt_len_mean',
-  'bwd_pkt_len_mean', 'flow_bytes_s', 'flow_pkts_s', 'flow_iat_mean',
-  'flow_iat_std', 'fwd_iat_mean', 'bwd_iat_mean', 'syn_flag_cnt',
-  'ack_flag_cnt', 'fin_flag_cnt', 'rst_flag_cnt', 'psh_flag_cnt',
-  'urg_flag_cnt', 'down_up_ratio', 'pkt_size_avg', 'ttl_variance',
-  'tcp_win_size', 'retransmit_cnt',
-];
-
-export const SOURCE_LABELS = {
+const SOURCE_LABELS = {
   simulated: { label: 'SIMULATION MODE', color: 'var(--accent)', icon: FlaskConical },
   live_capture: { label: 'LIVE CAPTURE', color: 'var(--severity-low)', icon: Wifi },
   csv_upload: { label: 'CSV UPLOAD', color: 'var(--severity-medium)', icon: Upload },

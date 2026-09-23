@@ -21,5 +21,9 @@
     "@vitejs/plugin-react": "^6.1.0",
     "oxlint": "^1.79.0",
     "vite": "^8.2.2"
+  },
+  "optionalDependencies": {
+    "@oxlint/binding-linux-x64-gnu": "^1.81.0",
+    "@oxlint/binding-win32-x64-msvc": "^1.81.0"
   }
 }

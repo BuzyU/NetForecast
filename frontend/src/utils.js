@@ -1,5 +1,14 @@
 // ── Stage helpers ──────────────────────────────────────────────
-const STAGES = ['Benign', 'Reconnaissance', 'Initial Access', 'Lateral Movement', 'C2', 'Exfiltration'];
+export const STAGES = ['Benign', 'Reconnaissance', 'Initial Access', 'Lateral Movement', 'C2', 'Exfiltration'];
+
+export const DEFAULT_FEAT_ORDER = [
+  'flow_duration', 'tot_fwd_pkts', 'tot_bwd_pkts', 'fwd_pkt_len_mean',
+  'bwd_pkt_len_mean', 'flow_bytes_s', 'flow_pkts_s', 'flow_iat_mean',
+  'flow_iat_std', 'fwd_iat_mean', 'bwd_iat_mean', 'syn_flag_cnt',
+  'ack_flag_cnt', 'fin_flag_cnt', 'rst_flag_cnt', 'psh_flag_cnt',
+  'urg_flag_cnt', 'down_up_ratio', 'pkt_size_avg', 'ttl_variance',
+  'tcp_win_size', 'retransmit_cnt',
+];
 
 export function stageIndex(stage) {
   const i = STAGES.indexOf(stage);
@@ -29,8 +38,6 @@ export function stageColor(stage) {
   };
   return map[stage] || '#8a7f72';
 }
-
-export { STAGES };
 
 // ── Severity ──────────────────────────────────────────────────
 export function severityClass(prob) {

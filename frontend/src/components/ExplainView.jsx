@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Eye, AlertTriangle } from 'lucide-react';
 import { apiFetch, apiPost } from '../api';
-import { stageClass, formatProb } from '../utils';
-import { DEFAULT_FEAT_ORDER, AppBadge, DirBadge, IdentityBadge } from './Badges';
+import { stageClass, formatProb, DEFAULT_FEAT_ORDER } from '../utils';
+import { AppBadge, DirBadge, IdentityBadge } from './Badges';
 
 export default function ExplainView({ featureList }) {
   const [sessions, setSessions] = useState([]);
