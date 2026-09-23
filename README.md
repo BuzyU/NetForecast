@@ -60,7 +60,7 @@ test sequences, across 1,334 real sessions) from the Canadian Institute for Cybe
 > - **Leakage-Free Validation:** Strict session-level train/test split. The standard scaler is fitted strictly on training sessions — zero test-set information leaks into the normalization parameters.
 >
 > **Per-MITRE-stage capability is uneven — read this before quoting the binary numbers above as "detects all attacks":**
-> Benign/Reconnaissance/C2 are reliably classified (F1 0.75–0.94). Initial Access (web attacks) has real recall (61%) but weak precision (13%) — it over-fires. **Lateral Movement and Exfiltration are not detected at all (0% recall, including at the binary alert level)** — CIC-IDS2017 only has ~36 Infiltration and ~11 Heartbleed flows in its entire public release, which is too little to learn from; we tried train-only synthetic oversampling for these two stages and confirmed via held-out evaluation that it did not transfer to real traffic. Full per-stage numbers and root-cause analysis are in [`docs/model_card.md`](docs/model_card.md#6-evaluation--comparative-benchmark).
+> Benign/Reconnaissance/C2 are reliably classified (F1 0.75–0.94). Initial Access (web attacks) has real recall (61%) but weak precision (13%) — it over-fires. **The ML model itself does not detect Lateral Movement or Exfiltration (0% recall)** — CIC-IDS2017 only has ~36 Infiltration and ~11 Heartbleed flows in its entire public release, which is too little to learn from; we tried train-only synthetic oversampling for these two stages and confirmed via held-out evaluation that it did not transfer to real traffic. **Exfiltration/Heartbleed is separately covered by a deterministic signature detector** (`capture/signatures.py`) that doesn't rely on the ML model at all — CVE-2014-0160 has a fixed wire-format signature, verified end-to-end against a crafted malicious packet with zero false positives on legitimate traffic. Lateral Movement has no equivalent signature and remains unsolved — it needs real additional data (CIC-IDS2018/CTU-13) or lab-captured traffic. Full per-stage numbers and root-cause analysis are in [`docs/model_card.md`](docs/model_card.md#6-evaluation--comparative-benchmark).
 
 ---
 
@@ -362,6 +362,7 @@ Network_Attack_Detection/
 │   │   ├── ingestion.py             # Sliding window buffer & Adaptive EMA threshold
 │   │   ├── network_identity.py      # IP subnetting & loopback/private-range classification
 │   │   ├── process_resolver.py      # Cross-platform (psutil) socket-to-PID & executable correlation
+│   │   ├── signatures.py            # Re-export of capture/signatures.py (Docker/standalone packaging)
 │   │   ├── main.py                  # App factory, SlowAPI rate limiter & CORS
 │   │   ├── model_loader.py          # Dynamic artifact loader (hidden_size, scaler)
 │   │   ├── schemas.py               # Pydantic request/response validation schemas
@@ -381,9 +382,10 @@ Network_Attack_Detection/
 │   │   └── world_model.pt           # Checkpointed PyTorch LSTM weights (256 units)
 │   └── tests/
 │       ├── test_inference.py        # 15 model/inference/explainability unit tests
-│       ├── test_api_integration.py  # End-to-end API & ingestion flow tests
-│       └── test_flow_parity.py      # PCAP vs live-capture feature-extraction parity tests
-│       # 26 tests total, 100% pass
+│       ├── test_api_integration.py  # End-to-end API, ingestion & Heartbleed-alert flow tests
+│       ├── test_flow_parity.py      # PCAP vs live-capture feature-extraction parity tests
+│       └── test_signatures.py       # Deterministic Heartbleed (CVE-2014-0160) signature tests
+│       # 34 tests total, 100% pass
 ├── frontend/                        # React 18 + Vite SOC Dashboard
 │   ├── src/
 │   │   ├── components/              # Reusable UI components
@@ -400,7 +402,9 @@ Network_Attack_Detection/
 │   ├── preprocess_cicids.py         # 22-feature mapper with stratified sampling
 │   └── raw_cicids/                  # 8 official CIC-IDS2017 CSV files (844 MB)
 ├── capture/                         # Hardware & network capture tools
-│   └── live_capture.py              # Scapy-based live sniffer on Ethernet/Wi-Fi
+│   ├── live_capture.py              # Scapy-based live sniffer on Ethernet/Wi-Fi
+│   ├── flow_state.py                # Shared 22-feature flow reconstruction (live capture + PCAP)
+│   └── signatures.py                # Deterministic packet signatures (Heartbleed CVE-2014-0160)
 ├── demo/                            # Simulation & demo harnesses
 │   └── traffic_simulator.py         # Multi-session kill-chain attack injector
 ├── pipeline_fixed.py                # MAX-configuration training pipeline

@@ -305,7 +305,49 @@ async def ingest_single_flow(
         "buffer_size": len(buf["flows"]),
         "prediction": None,
         "alert": None,
+        "heartbleed_alert": None,
     }
+
+    # ── Deterministic Heartbleed (CVE-2014-0160) signature override ───
+    # Independent of the ML window-based prediction below: a single malformed
+    # TLS Heartbeat record is a complete, self-contained exploit attempt and
+    # doesn't need W=6 flows of temporal context to be worth alerting on.
+    # This exists because real_flows.csv (CIC-IDS2017-derived) has only ~2
+    # real Exfiltration/Heartbleed examples to learn from — not enough for
+    # any model to reliably detect this from statistics alone — but the
+    # exploit has a deterministic wire-format signature that doesn't need to
+    # be learned at all. See capture/signatures.py.
+    if getattr(flow, "heartbleed_signature", False):
+        session.latest_risk_score = 1.0
+        session.latest_stage = "Exfiltration"
+        current_max_idx = _stage_index(session.max_stage_reached or "Benign")
+        if _stage_index("Exfiltration") > current_max_idx:
+            session.max_stage_reached = "Exfiltration"
+        db_record.infiltration_prob = 1.0
+        db_record.predicted_stage = "Exfiltration"
+
+        heartbleed_action = (
+            "CVE-2014-0160 (Heartbleed) signature detected: malformed TLS "
+            "Heartbeat payload_length exceeds the record's actual size. "
+            "Isolate host and patch OpenSSL immediately. This is a "
+            "deterministic wire-format signature match, not an ML inference."
+        )
+        heartbleed_alert = AlertDB(
+            session_key=session_key,
+            severity="critical",
+            infiltration_prob=1.0,
+            predicted_stage="Exfiltration",
+            recommended_action=heartbleed_action,
+            created_at=now,
+        )
+        db.add(heartbleed_alert)
+        result_data["heartbleed_alert"] = {
+            "severity": "critical",
+            "predicted_stage": "Exfiltration",
+            "infiltration_prob": 1.0,
+            "recommended_action": heartbleed_action,
+            "signature": "heartbleed_cve_2014_0160",
+        }
 
     # ── Run prediction if window is full ──────────────────────────
     if len(buf["flows"]) >= WINDOW_SIZE:
@@ -379,7 +421,7 @@ async def ingest_single_flow(
     # ── Broadcast to live WebSocket clients (BUG-01 fix) ──────────
     # Fire-and-forget: errors in broadcast must NOT prevent ingestion response.
     try:
-        event_type = "alert" if result_data["alert"] else (
+        event_type = "alert" if (result_data["alert"] or result_data["heartbleed_alert"]) else (
             "prediction" if result_data["prediction"] else "flow_ingested"
         )
         await broadcast({
@@ -412,6 +454,7 @@ async def ingest_single_flow(
             ),
             "max_stage_reached": session.max_stage_reached,
             "alert": result_data["alert"],
+            "heartbleed_alert": result_data["heartbleed_alert"],
             "timestamp": now.isoformat(),
         })
     except Exception as exc:

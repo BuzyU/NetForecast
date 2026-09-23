@@ -62,6 +62,12 @@ class FlowRecord(BaseModel):
         default="api",
         description='Origin of this flow: "live_capture", "simulated", "csv_upload", or "api"',
     )
+    heartbleed_signature: Optional[bool] = Field(
+        default=False,
+        description="Set by capture/pcap ingestion when a deterministic CVE-2014-0160 "
+                     "malformed-heartbeat wire signature was found in this flow's packets. "
+                     "Not one of the 22 ML features — triggers an immediate rule-based alert.",
+    )
 
     @field_validator("src_ip", "dst_ip")
     @classmethod
@@ -224,6 +230,7 @@ class SingleFlowIngestResponse(BaseModel):
     buffer_size: int
     prediction: Optional[dict] = None
     alert: Optional[dict] = None
+    heartbleed_alert: Optional[dict] = None
 
 
 class IngestResponse(BaseModel):

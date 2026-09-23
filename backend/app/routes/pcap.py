@@ -76,6 +76,7 @@ async def ingest_pcap(
 
             src_port, dst_port = 0, 0
             tcp_flags, tcp_win, seq = 0, 0, 0
+            payload = b""
 
             if pkt.haslayer(TCP):
                 tcp = pkt[TCP]
@@ -84,6 +85,8 @@ async def ingest_pcap(
                 tcp_flags = int(tcp.flags)
                 tcp_win = int(tcp.window)
                 seq = int(tcp.seq)
+                if tcp.payload:
+                    payload = bytes(tcp.payload)
             elif pkt.haslayer(UDP):
                 udp = pkt[UDP]
                 src_port = int(udp.sport)
@@ -114,6 +117,7 @@ async def ingest_pcap(
                 ttl=ttl,
                 tcp_win=tcp_win,
                 seq=seq,
+                payload=payload,
             )
         reader.close()
     except Exception as e:
@@ -132,6 +136,7 @@ async def ingest_pcap(
             feat_dict["src_ip"] = flow_state.src_ip
             feat_dict["dst_ip"] = flow_state.dst_ip
             feat_dict["source"] = "pcap_upload"
+            feat_dict["heartbleed_signature"] = flow_state.heartbleed_detected
             feat_dict["timestamp"] = (
                 datetime.fromtimestamp(flow_state.start_time, tz=timezone.utc)
                 if flow_state.start_time > 0
@@ -141,7 +146,7 @@ async def ingest_pcap(
             flow_record = FlowRecord(**feat_dict)
             result = await ingest_single_flow(flow_record, db)
             accepted += 1
-            if result.get("alert"):
+            if result.get("alert") or result.get("heartbleed_alert"):
                 alerts_generated += 1
         except Exception as exc:
             rejected += 1

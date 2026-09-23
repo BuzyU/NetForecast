@@ -94,7 +94,7 @@ async def ingest_csv(
             result = await ingest_single_flow(flow, db)
             accepted += 1
 
-            if result.get("alert"):
+            if result.get("alert") or result.get("heartbleed_alert"):
                 alerts_generated += 1
 
         except (ValueError, TypeError, KeyError) as e:

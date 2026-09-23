@@ -142,6 +142,44 @@ def test_full_chain_ingest_alert_and_query(client: TestClient):
     assert isinstance(alerts, list)
 
 
+def test_heartbleed_signature_triggers_immediate_alert(client: TestClient):
+    """
+    A flow flagged with heartbleed_signature=True must produce a critical
+    'Exfiltration' alert on the very first flow — it must not wait for the
+    6-flow ML window to fill, since a single malformed heartbeat is already
+    a complete exploit attempt.
+    """
+    flow = make_dummy_flow(src_ip="192.168.20.5", dst_ip="10.20.20.5")
+    flow["heartbleed_signature"] = True
+    res = client.post("/ingest", json=flow)
+    assert res.status_code == 200
+    data = res.json()
+
+    assert data["buffer_size"] == 1  # window is nowhere near full yet
+    assert data["prediction"] is None  # ML path didn't run
+    assert data["heartbleed_alert"] is not None
+    assert data["heartbleed_alert"]["severity"] == "critical"
+    assert data["heartbleed_alert"]["predicted_stage"] == "Exfiltration"
+    assert data["heartbleed_alert"]["infiltration_prob"] == 1.0
+
+    alerts_res = client.get("/alerts")
+    assert alerts_res.status_code == 200
+    alerts = alerts_res.json()
+    assert any(
+        a.get("predicted_stage") == "Exfiltration" and a.get("severity") == "critical"
+        for a in alerts
+    )
+
+
+def test_normal_flow_does_not_trigger_heartbleed_alert(client: TestClient):
+    """Sanity check: a normal flow (heartbleed_signature defaults to False) never
+    produces a heartbleed_alert."""
+    flow = make_dummy_flow(src_ip="192.168.20.6", dst_ip="10.20.20.6")
+    res = client.post("/ingest", json=flow)
+    assert res.status_code == 200
+    assert res.json()["heartbleed_alert"] is None
+
+
 def test_ingest_csv_batch_upload(client: TestClient):
     """Verify batch flow upload via CSV."""
     header = ",".join(FLOW_FEATURES + ["src_ip", "dst_ip", "src_port", "dst_port", "protocol"])

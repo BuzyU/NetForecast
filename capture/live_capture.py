@@ -89,6 +89,7 @@ class FlowExtractor:
         tcp_flags = 0
         tcp_win = 0
         seq = 0
+        payload = b""
 
         if pkt.haslayer(TCP):
             tcp = pkt[TCP]
@@ -97,6 +98,8 @@ class FlowExtractor:
             tcp_flags = int(tcp.flags)
             tcp_win = int(tcp.window)
             seq = int(tcp.seq)
+            if tcp.payload:
+                payload = bytes(tcp.payload)
         elif pkt.haslayer(UDP):
             udp = pkt[UDP]
             src_port = int(udp.sport)
@@ -124,6 +127,7 @@ class FlowExtractor:
             ttl=ttl,
             tcp_win=tcp_win,
             seq=seq,
+            payload=payload,
         )
 
         now = time.time()
@@ -162,6 +166,7 @@ class FlowExtractor:
         features["protocol"] = proto_map.get(flow.protocol, str(flow.protocol))
         features["timestamp"] = datetime.now(timezone.utc).isoformat()
         features["source"] = "live_capture"  # §7 provenance tag
+        features["heartbleed_signature"] = flow.heartbleed_detected
 
         try:
             resp = requests.post(
@@ -193,6 +198,10 @@ class FlowExtractor:
                 else:
                     buf = result.get("buffer_size", "?")
                     status += f"Buffering ({buf}/6)"
+
+                if flow.heartbleed_detected:
+                    self.alerts_triggered += 1
+                    status += " | 🚨 HEARTBLEED SIGNATURE (CVE-2014-0160) DETECTED"
 
                 logger.info(status)
             else:

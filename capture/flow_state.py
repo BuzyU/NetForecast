@@ -8,6 +8,11 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+try:
+    from .signatures import detect_heartbleed
+except ImportError:
+    from signatures import detect_heartbleed
+
 
 @dataclass
 class FlowState:
@@ -50,6 +55,8 @@ class FlowState:
     retransmit_count: int = 0
     packet_count: int = 0
 
+    heartbleed_detected: bool = False
+
     def add_packet(
         self,
         pkt_len: int,
@@ -59,6 +66,7 @@ class FlowState:
         ttl: int = 64,
         tcp_win: int = 0,
         seq: int = 0,
+        payload: bytes = b"",
     ):
         if self.packet_count == 0:
             self.start_time = timestamp
@@ -115,6 +123,9 @@ class FlowState:
                 self.retransmit_count += 1
             else:
                 self._seen_seqs.add(seq)
+
+        if payload and not self.heartbleed_detected:
+            self.heartbleed_detected = detect_heartbleed(payload)
 
     def to_features(self) -> dict:
         duration_us = (self.last_time - self.start_time) * 1e6 if self.last_time > self.start_time else 0.0
