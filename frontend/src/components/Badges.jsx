@@ -3,8 +3,8 @@ import {
   ArrowDownToLine, ArrowUpFromLine, Network, Terminal, Globe,
   Cpu, Shield, Zap, Activity, FlaskConical, Wifi, Upload, RotateCcw, X,
 } from 'lucide-react';
-import { apiFetch, apiPost } from '../api';
-import { stageClass, stageIndex, formatTime, STAGES } from '../utils';
+import { apiFetch } from '../api';
+import { stageIndex, formatTime, STAGES } from '../utils';
 
 export const DEFAULT_FEAT_ORDER = [
   'flow_duration', 'tot_fwd_pkts', 'tot_bwd_pkts', 'fwd_pkt_len_mean',
@@ -200,13 +200,18 @@ export function WellbeingModal({ isOpen, onClose }) {
 
   useEffect(() => {
     if (!isOpen) return;
-    setLoading(true);
+    let mounted = true;
     apiFetch('/system/cycle/history')
       .then(data => {
-        setCycles(Array.isArray(data) ? data : []);
-        setLoading(false);
+        if (mounted) {
+          setCycles(Array.isArray(data) ? data : []);
+          setLoading(false);
+        }
       })
-      .catch(() => setLoading(false));
+      .catch(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => { mounted = false; };
   }, [isOpen]);
 
   if (!isOpen) return null;

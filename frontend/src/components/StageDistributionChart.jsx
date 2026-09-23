@@ -3,20 +3,16 @@ import { apiFetch } from '../api';
 import { stageColor } from '../utils';
 
 function StageDistributionChart({ stageDist: propDist }) {
-  const [data, setData] = useState(propDist || []);
+  const [fetchedData, setFetchedData] = useState([]);
   const [loading, setLoading] = useState(!propDist);
 
   useEffect(() => {
-    if (propDist) {
-      setData(propDist);
-      setLoading(false);
-      return;
-    }
+    if (propDist) return;
     let mounted = true;
     apiFetch('/dashboard/stage-distribution')
       .then(res => {
         if (mounted && Array.isArray(res)) {
-          setData(res);
+          setFetchedData(res);
           setLoading(false);
         }
       })
@@ -25,6 +21,8 @@ function StageDistributionChart({ stageDist: propDist }) {
       });
     return () => { mounted = false; };
   }, [propDist]);
+
+  const data = propDist || fetchedData;
 
   const maxCount = data.length > 0 ? Math.max(...data.map(s => s.count)) : 1;
 
