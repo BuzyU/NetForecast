@@ -28,7 +28,6 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(line_buffering=True)
 
 
-# ---- FIX 1: no get_ipython() — real subprocess install guard instead ----
 def ensure_packages():
     required = ["torch", "pandas", "numpy", "matplotlib", "shap", "tqdm"]
     for pkg in required:
@@ -62,7 +61,6 @@ FLOW_FEATURES = [
 WINDOW = 6
 
 
-# ── Self-contained Scaler & Metrics (immune to Windows App Control DLL blocks) ──
 class StandardScaler:
     def __init__(self, mean=None, scale=None):
         self.mean_ = np.asarray(mean, dtype=np.float32) if mean is not None else None
@@ -224,12 +222,6 @@ class IsolationForestBaseline:
         return (avg_lengths < thresh).astype(int)
 
 
-# (mean, std) per feature per stage — realistic CIC-IDS magnitudes.
-# Shared by generate_synthetic_flows() (full cold-start fallback dataset) and
-# augment_rare_stages() (targeted oversampling of stages CIC-IDS2017 barely
-# has real examples of). These profiles match traffic_simulator.py's
-# STAGE_PROFILES so the scaler stays consistent across offline training,
-# live capture, and the demo simulator.
 STAGE_PROFILES_MEAN = {
     "Benign": [50000, 10, 8, 200, 180, 5000, 20, 50000, 30000, 60000, 70000, 1, 5, 1, 0, 2, 0, 1.0, 400, 5, 8192, 0],
     "Reconnaissance": [5000, 50, 2, 60, 20, 15000, 120, 3000, 2000, 4000, 8000, 8, 2, 0, 2, 1, 0, 0.2, 80, 3, 1024, 1],
@@ -313,7 +305,7 @@ def generate_synthetic_flows(n_sessions=400, session_len=30):
         for t, stage in enumerate(stage_sequence):
             means = np.array(PROFILES[stage], dtype=np.float64)
             stds  = np.array(STDS[stage],    dtype=np.float64)
-            base  = np.maximum(0, np.random.normal(means, stds))  # non-negative
+            base  = np.maximum(0, np.random.normal(means, stds))
             row = dict(zip(FLOW_FEATURES, base))
             row["session_id"] = sid
             row["timestamp"] = t0 + pd.Timedelta(seconds=t * 2)
@@ -374,9 +366,6 @@ class FocalLoss(nn.Module):
         pt = log_pt.exp()
         alpha_t = self.alpha[targets]
         loss = -alpha_t * (1.0 - pt).pow(self.gamma) * log_pt
-        # Match nn.CrossEntropyLoss(weight=..., reduction="mean")'s convention of
-        # dividing by the sum of sample weights, not batch size — otherwise gamma=0
-        # would NOT reduce to weighted_ce's exact loss scale (verified by test).
         return loss.sum() / alpha_t.sum()
 
 
@@ -445,7 +434,6 @@ def monte_carlo_rollout(model, initial_window, k_steps=5, n_samples=20, noise_st
             all_stages[i][step["step"] - 1] = step["predicted_stage"]
     mean_probs = all_probs.mean(axis=0)
     std_probs = all_probs.std(axis=0)
-    # FIX 4: deterministic tie-break — sort candidates by STAGES index, not set() order
     mode_stages = []
     for col in zip(*all_stages):
         counts = {s: col.count(s) for s in set(col)}
@@ -519,9 +507,6 @@ def main():
     data_source = args.data if (args.data and os.path.exists(args.data)) else "synthetic"
     print(f"Dataset shape: {df.shape}", flush=True)
 
-    # ── LEAKAGE FIX 1: split by session_id BEFORE scaling ──────────────
-    # LEAKAGE FIX 2: three-way split so checkpoint selection (val) and final
-    # reporting (test) never touch the same data -- see three_way_split() docstring.
     unique_sids = df["session_id"].unique()
     train_sids, val_sids, test_sids = three_way_split(
         unique_sids, val_size=0.1, test_size=0.2, random_state=SEED
@@ -533,9 +518,6 @@ def main():
     val_df = df[val_mask].copy()
     test_df = df[test_mask].copy()
 
-    # ── Synthetic oversampling of stages real_flows.csv can't teach from ──
-    # Applied to train_df only, strictly AFTER the session split, so the held-out
-    # val/test sets stay 100% real and evaluation numbers stay honest.
     augment_stages = [s.strip() for s in args.augment_stages.split(",") if s.strip()]
     if augment_stages:
         synth_df = augment_rare_stages(augment_stages, n_sessions_per_stage=args.augment_sessions_per_stage)
@@ -543,9 +525,9 @@ def main():
         print(f"Train shape after augmentation: {train_df.shape}", flush=True)
 
     scaler = StandardScaler()
-    train_df[FLOW_FEATURES] = scaler.fit_transform(train_df[FLOW_FEATURES])   # fit on train only
-    val_df[FLOW_FEATURES]   = scaler.transform(val_df[FLOW_FEATURES])         # transform only
-    test_df[FLOW_FEATURES]  = scaler.transform(test_df[FLOW_FEATURES])        # transform only
+    train_df[FLOW_FEATURES] = scaler.fit_transform(train_df[FLOW_FEATURES])
+    val_df[FLOW_FEATURES]   = scaler.transform(val_df[FLOW_FEATURES])
+    test_df[FLOW_FEATURES]  = scaler.transform(test_df[FLOW_FEATURES])
 
     train_df["stage_id"] = train_df["stage_label"].map(STAGE2ID)
     val_df["stage_id"]   = val_df["stage_label"].map(STAGE2ID)
@@ -563,14 +545,12 @@ def main():
     X_train_flat = X_train.reshape(X_train.shape[0], -1)
     X_test_flat = X_test.reshape(X_test.shape[0], -1)
 
-    # ── Baseline 1: Logistic Regression ───────────────────────────────
     lr_baseline = LogisticRegressionBaseline(input_dim=X_train_flat.shape[1])
     lr_baseline.fit(X_train_flat, ym_train)
     lr_pred = lr_baseline.predict(X_test_flat)
     lr_metrics = compute_metrics(ym_test, lr_pred)
     print("LOGISTIC REGRESSION BASELINE:", lr_metrics, flush=True)
 
-    # ── Baseline 2: Isolation Forest (PS requirement) ─────────────────
     iso_forest = IsolationForestBaseline(contamination=0.3)
     iso_forest.fit(X_train_flat)
     iso_pred = iso_forest.predict(X_test_flat)
@@ -581,7 +561,6 @@ def main():
     val_loader = DataLoader(FlowSeqDataset(X_val, yn_val, ym_val, ys_val), batch_size=args.batch_size, shuffle=False)
     test_loader = DataLoader(FlowSeqDataset(X_test, yn_test, ym_test, ys_test), batch_size=args.batch_size, shuffle=False)
 
-    # ── CLASS-WEIGHTED LOSS (Maximizes Recall on Rare Attack Stages) ───
     stage_counts = np.bincount(ys_train, minlength=len(STAGES))
     total_samples = len(ys_train)
     raw_weights = total_samples / (len(STAGES) * np.maximum(stage_counts, 1).astype(np.float32))
@@ -602,7 +581,6 @@ def main():
     print(f"Class weighting enabled: stage_weights={np.round(class_weights, 2)}, pos_weight={pos_weight_val:.2f}", flush=True)
     print(f"Stage loss: {args.stage_loss}" + (f" (gamma={args.focal_gamma})" if args.stage_loss == "focal" else ""), flush=True)
 
-    # ── MODEL & OPTIMIZER ─────────────────────────────────────────────
     model = WorldModel(
         n_features=len(FLOW_FEATURES),
         hidden=args.hidden_size,
@@ -632,10 +610,6 @@ def main():
 
         epoch_loss = total_loss / len(train_loader.dataset)
 
-        # Validation at epoch end — uses val_loader, NEVER test_loader. Checkpoint
-        # selection on the same set you report final numbers on is leakage: the
-        # reported score becomes optimistically biased toward whichever epoch
-        # happened to do best on that exact held-out data.
         model.eval()
         val_preds, val_true = [], []
         with torch.no_grad():
@@ -667,9 +641,6 @@ def main():
         print(f"\nLoading best checkpoint with validation F1: {best_val_f1:.4f}", flush=True)
         model.load_state_dict(best_model_state)
 
-    # Final evaluation with best model — test_loader has NEVER been used for
-    # checkpoint selection or any decision above; this is its only use in the
-    # entire script, exactly once, after the model is fully fixed.
     model.eval()
     all_preds, all_true = [], []
     with torch.no_grad():
@@ -695,7 +666,6 @@ def main():
     print(comparison)
     print("=" * 60, flush=True)
 
-    # FIX 2 applied: curated demo session with richest stage progression
     demo_sid = pick_demo_session(train_sorted)
     demo_session = train_sorted[train_sorted["session_id"] == demo_sid]
     demo_feats = demo_session[FLOW_FEATURES].values

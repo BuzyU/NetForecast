@@ -53,7 +53,6 @@ async def lifespan(app: FastAPI):
     await init_db()
     await _migrate_db()
 
-    # Explicitly initialize or preserve active session and cycle data
     from .routes.system import CycleState
     CycleState.initialize()
     logger.info("Active monitoring cycle initialized: %s (started %s)", CycleState.cycle_id, CycleState.started_at.isoformat())
@@ -114,7 +113,7 @@ async def _migrate_db():
                 )
                 logger.info("Migration: added column %s.%s", table, col)
             except Exception:
-                pass  # column already exists — expected on subsequent starts
+                pass
 
 
 app = FastAPI(
@@ -136,7 +135,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Rate limiting (SlowAPI) ───────────────────────────────────────────
 try:
     from slowapi import Limiter, _rate_limit_exceeded_handler
     from slowapi.errors import RateLimitExceeded
@@ -152,7 +150,6 @@ except ImportError:
     logger.info("SlowAPI not installed — proceeding without rate limiter")
 
 
-# ── Optional API Key Authentication ──────────────────────────────────
 @app.middleware("http")
 async def api_key_auth_middleware(request: Request, call_next):
     if API_KEY and not request.url.path.startswith(("/health", "/docs", "/openapi.json", "/redoc", "/ws")):
@@ -198,7 +195,7 @@ async def health_check():
         db_connected=db_ok,
         artifacts_path=str(ARTIFACTS_DIR),
         features_count=N_FEATURES,
-        features=FLOW_FEATURES,  # BUG-08: single source of truth for feature order
+        features=FLOW_FEATURES,
         stages=STAGES,
         device=str(artifacts.device) if model_ok else "unavailable",
         system_mode=SystemState.mode,

@@ -50,7 +50,6 @@ export default function ReportsView() {
       window.URL.revokeObjectURL(blobUrl);
     } catch (err) {
       console.error(`Export ${format} failed:`, err);
-      // Fallback to window.open
       window.open(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/reports/export/${format}`, '_blank');
     } finally {
       setExporting(false);
@@ -78,7 +77,6 @@ export default function ReportsView() {
 
   return (
     <>
-      {/* ── Action & Export Bar ── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-4)', flexWrap: 'wrap', gap: 'var(--sp-2)' }}>
         <div>
           <span className="section-label" style={{ marginBottom: 2 }}>SECURITY_AUDIT // FORENSIC_REPORT</span>
@@ -118,9 +116,7 @@ export default function ReportsView() {
         </div>
       </div>
 
-      {/* ── Summary & Stage Distribution Grid ── */}
       <div className="report-grid mb-4">
-        {/* Stats panel */}
         <div className="panel">
           <div className="panel-header">
             <span className="panel-title">TELEMETRY_METRICS</span>
@@ -135,7 +131,6 @@ export default function ReportsView() {
           </div>
         </div>
 
-        {/* Stage distribution */}
         <div className="panel">
           <div className="panel-header">
             <span className="panel-title">MITRE_STAGE_DISTRIBUTION</span>
@@ -161,7 +156,6 @@ export default function ReportsView() {
         </div>
       </div>
 
-      {/* ── Active Sessions Section ── */}
       <div className="panel mb-4">
         <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span className="panel-title">ACTIVE_SESSIONS_AUDIT</span>
@@ -213,7 +207,6 @@ export default function ReportsView() {
         </div>
       </div>
 
-      {/* ── Security Alerts Section ── */}
       <div className="panel">
         <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span className="panel-title">INCIDENT_ALERTS_&_PLAYBOOKS</span>

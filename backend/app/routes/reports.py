@@ -71,7 +71,7 @@ async def export_csv(
             writer.writerow(row)
         filename = f"netforecast_flows_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv"
 
-    else:  # sessions
+    else:
         writer.writerow([
             "session_key", "src_ip", "dst_ip", "flow_count",
             "latest_risk_score", "latest_stage", "max_stage_reached",
@@ -107,16 +107,13 @@ async def export_json(db: AsyncSession = Depends(get_db)):
     """
     now = datetime.now(timezone.utc)
 
-    # 1. Total sessions and at-risk count
     total_sessions = (await db.execute(select(func.count(SessionDB.id)))).scalar_one() or 0
     at_risk_sessions = (await db.execute(
         select(func.count(SessionDB.id)).where(SessionDB.latest_risk_score > DEFAULT_THRESHOLD)
     )).scalar_one() or 0
 
-    # 2. Total flows
     total_flows = (await db.execute(select(func.count(FlowRecordDB.id)))).scalar_one() or 0
 
-    # 3. Alert stats
     total_alerts = (await db.execute(select(func.count(AlertDB.id)))).scalar_one() or 0
     unack_alerts = (await db.execute(
         select(func.count(AlertDB.id)).where(AlertDB.acknowledged.is_(False))
@@ -127,7 +124,6 @@ async def export_json(db: AsyncSession = Depends(get_db)):
         )
     )).scalar_one() or 0
 
-    # 4. Stage distribution
     stage_dist_res = await db.execute(
         select(SessionDB.latest_stage, func.count(SessionDB.id))
         .group_by(SessionDB.latest_stage)
@@ -136,7 +132,6 @@ async def export_json(db: AsyncSession = Depends(get_db)):
         row[0] or "Benign": row[1] for row in stage_dist_res.all()
     }
 
-    # 5. Top at-risk sessions
     top_sessions_res = await db.execute(
         select(SessionDB).order_by(SessionDB.latest_risk_score.desc()).limit(50)
     )
@@ -194,31 +189,26 @@ async def export_json(db: AsyncSession = Depends(get_db)):
 async def _build_forensic_html(db: AsyncSession) -> tuple[str, datetime]:
     now = datetime.now(timezone.utc)
 
-    # 1. Total counts
     total_sessions = (await db.execute(select(func.count(SessionDB.id)))).scalar_one() or 0
     at_risk_sessions = (await db.execute(
         select(func.count(SessionDB.id)).where(SessionDB.latest_risk_score > DEFAULT_THRESHOLD)
     )).scalar_one() or 0
     total_flows = (await db.execute(select(func.count(FlowRecordDB.id)))).scalar_one() or 0
 
-    # 2. Alerts
     alerts_res = await db.execute(select(AlertDB).order_by(AlertDB.created_at.desc()).limit(100))
     alerts = alerts_res.scalars().all()
     total_alerts = len(alerts)
     unack_alerts = sum(1 for a in alerts if not a.acknowledged)
     critical_alerts = sum(1 for a in alerts if a.severity == "critical")
 
-    # 3. Sessions
     sessions_res = await db.execute(select(SessionDB).order_by(SessionDB.latest_risk_score.desc()).limit(100))
     sessions = sessions_res.scalars().all()
 
-    # 4. Stage distribution
     stage_dist_res = await db.execute(
         select(SessionDB.latest_stage, func.count(SessionDB.id)).group_by(SessionDB.latest_stage)
     )
     stage_counts = {row[0] or "Benign": row[1] for row in stage_dist_res.all()}
 
-    # Calculate Network Wellbeing Score
     wellbeing = 100.0
     for a in alerts:
         sev = (a.severity or "").lower()
@@ -240,7 +230,6 @@ async def _build_forensic_html(db: AsyncSession) -> tuple[str, datetime]:
     wellbeing = round(max(0.0, min(100.0, wellbeing - stage_penalties.get(max_stage, 0.0))), 1)
     wellbeing_color = "#27ae60" if wellbeing >= 80 else "#e67e22" if wellbeing >= 50 else "#c0392b"
 
-    # Build Session Rows HTML
     session_rows = ""
     for s in sessions:
         risk_pct = (s.latest_risk_score or 0.0) * 100
@@ -267,7 +256,6 @@ async def _build_forensic_html(db: AsyncSession) -> tuple[str, datetime]:
         </tr>
         """
 
-    # Build Alert Rows HTML
     alert_rows = ""
     if not alerts:
         alert_rows = "<tr><td colspan='6' style='text-align:center; color:#8a7f72; padding:20px;'>No security alerts generated for this cycle. System baseline nominal.</td></tr>"
@@ -287,7 +275,6 @@ async def _build_forensic_html(db: AsyncSession) -> tuple[str, datetime]:
             </tr>
             """
 
-    # Stage dist bars HTML
     max_c = max(stage_counts.values()) if stage_counts else 1
     stage_bars = ""
     for stg in STAGES:

@@ -23,7 +23,6 @@ import numpy as np
 import pandas as pd
 
 
-# ── Label mapping: CIC-IDS2017 → 6-stage MITRE taxonomy ──────
 def map_label(raw_label: str) -> Optional[str]:
     """Robust substring-based mapping immune to encoding differences and dash types."""
     if not isinstance(raw_label, str):
@@ -44,7 +43,6 @@ def map_label(raw_label: str) -> Optional[str]:
     return None
 
 
-# ── Feature candidates mapping ──────────────────────────────
 FEATURE_CANDIDATES = {
     "flow_duration": ["Flow Duration"],
     "tot_fwd_pkts": ["Total Fwd Packets", "Total Fwd Packet"],
@@ -95,7 +93,6 @@ def process_single_csv(filepath: Path, sample_limit: Optional[int] = None, file_
 
     df = normalize_columns(df)
 
-    # ── Locate Label column ───────────────────────────────────
     label_col = None
     for candidate in ["Label", "label"]:
         for col in df.columns:
@@ -117,12 +114,10 @@ def process_single_csv(filepath: Path, sample_limit: Optional[int] = None, file_
 
     df["is_malicious"] = (df["stage_label"] != "Benign").astype(int)
 
-    # ── Stratified Sampling (Preserve 100% of Rare Attacks!) ───
     if sample_limit and len(df) > sample_limit:
         mal_indices = df[df["is_malicious"] == 1].index
         ben_indices = df[df["is_malicious"] == 0].index
 
-        # If attacks exceed sample_limit // 2, sample attacks; otherwise keep ALL attacks!
         max_mal = sample_limit // 2
         if len(mal_indices) > max_mal:
             chosen_mal = np.random.RandomState(42).choice(mal_indices, size=max_mal, replace=False)
@@ -136,7 +131,6 @@ def process_single_csv(filepath: Path, sample_limit: Optional[int] = None, file_
         df = df.loc[selected_indices].copy()
         print(f"    Stratified sample: {len(chosen_mal)} attacks + {needed_ben} benign = {len(df)} rows")
 
-    # ── Map feature columns ───────────────────────────────────
     result = pd.DataFrame(index=df.index)
 
     for target_feat, candidates in FEATURE_CANDIDATES.items():
@@ -152,8 +146,6 @@ def process_single_csv(filepath: Path, sample_limit: Optional[int] = None, file_
         if not found:
             result[target_feat] = 0.0
 
-    # ── Derived proxy features ────────────────────────────────
-    # ttl_variance: proxy from header length variation
     fwd_h_col = "Fwd Header Length" if "Fwd Header Length" in df.columns else None
     bwd_h_col = "Bwd Header Length" if "Bwd Header Length" in df.columns else None
     if fwd_h_col and bwd_h_col:
@@ -163,7 +155,6 @@ def process_single_csv(filepath: Path, sample_limit: Optional[int] = None, file_
     else:
         result["ttl_variance"] = 0.0
 
-    # tcp_win_size: Init_Win_bytes_forward
     if "Init_Win_bytes_forward" in df.columns:
         result["tcp_win_size"] = pd.to_numeric(df["Init_Win_bytes_forward"], errors="coerce").fillna(0)
     elif "Init Win bytes forward" in df.columns:
@@ -171,7 +162,6 @@ def process_single_csv(filepath: Path, sample_limit: Optional[int] = None, file_
     else:
         result["tcp_win_size"] = 0.0
 
-    # retransmit_cnt: proxy from "Subflow Fwd Packets" vs "Total Fwd Packets"
     if "Subflow Fwd Packets" in df.columns:
         sub = pd.to_numeric(df["Subflow Fwd Packets"], errors="coerce").fillna(0)
         tot = result["tot_fwd_pkts"].fillna(0)
@@ -179,7 +169,6 @@ def process_single_csv(filepath: Path, sample_limit: Optional[int] = None, file_
     else:
         result["retransmit_cnt"] = 0.0
 
-    # ── Source/Destination IPs & Timestamps ───────────────────
     src_cols = [c for c in df.columns if c.strip().lower() in ["source ip", "src ip"]]
     dst_cols = [c for c in df.columns if c.strip().lower() in ["destination ip", "dst ip"]]
     ts_cols  = [c for c in df.columns if c.strip().lower() in ["timestamp", "flow start time"]]
@@ -194,30 +183,24 @@ def process_single_csv(filepath: Path, sample_limit: Optional[int] = None, file_
         result["timestamp"] = pd.to_datetime(df[ts_cols[0]], errors="coerce", dayfirst=True)
         result["timestamp"] = result["timestamp"].fillna(pd.Timestamp("2026-01-01"))
     else:
-        # Generate monotonic timestamps 2s apart starting from day offset
         base_t = pd.Timestamp("2026-01-01") + pd.Timedelta(days=file_idx)
         result["timestamp"] = [base_t + pd.Timedelta(seconds=i * 2) for i in range(len(result))]
 
     result["stage_label"] = df["stage_label"].values
     result["is_malicious"] = df["is_malicious"].values
 
-    # ── Session ID: (src_ip, dst_ip, 5-min bucket) or 30-flow chunking ─
     if has_ips and has_ts:
         time_bucket = (result["timestamp"].astype("int64") // (5 * 60 * 10**9)).astype(int)
         result["session_id"] = (
             result["src_ip"] + "_" + result["dst_ip"] + "_" + time_bucket.astype(str)
         )
     else:
-        # Group chronological flows into sessions of 30 flows
-        # Ensures each session has >= 6 flows for LSTM windowing!
         session_idx = np.arange(len(result)) // 30
         result["session_id"] = f"file{file_idx}_sess_" + session_idx.astype(str)
 
-    # Map to integer session IDs within file
     session_map = {k: i for i, k in enumerate(result["session_id"].unique())}
     result["session_id"] = result["session_id"].map(session_map.get)
 
-    # ── Clean infinities and NaN ──────────────────────────────
     result = result.replace([np.inf, -np.inf], np.nan)
     result = result.fillna(0)
 
@@ -262,11 +245,9 @@ def main():
 
     combined = pd.concat(all_frames, ignore_index=True)
 
-    # Re-index unique integer session IDs across all files
     session_map = {k: i for i, k in enumerate(combined["session_id"].unique())}
     combined["session_id"] = combined["session_id"].map(session_map.get)
 
-    # Sort by session + time
     combined = combined.sort_values(["session_id", "timestamp"]).reset_index(drop=True)
 
     print("=" * 70)

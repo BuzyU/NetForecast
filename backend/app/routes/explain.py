@@ -85,11 +85,9 @@ async def _get_session_explanation(
     method: str,
     db: AsyncSession,
 ) -> tuple[dict, dict, list]:
-    # 1. Fetch session
     sess_res = await db.execute(select(SessionDB).where(SessionDB.session_key == session_key))
     session = sess_res.scalar_one_or_none()
     if not session:
-        # Fallback dummy session
         session_data = {
             "session_key": session_key,
             "src_ip": "unknown",
@@ -112,7 +110,6 @@ async def _get_session_explanation(
             "latest_stage": session.latest_stage or "Benign",
         }
 
-    # 2. Fetch flows
     flows_res = await db.execute(
         select(FlowRecordDB)
         .where(FlowRecordDB.session_key == session_key)
@@ -122,7 +119,6 @@ async def _get_session_explanation(
     flows = flows_res.scalars().all()
 
     if not flows:
-        # Generate zero window
         window = np.zeros((WINDOW_SIZE, N_FEATURES), dtype=np.float32)
     else:
         wf = list(reversed(flows))
@@ -133,7 +129,6 @@ async def _get_session_explanation(
             dtype=np.float32,
         )
 
-    # 3. Compute explanation
     scaled_window = artifacts.scale_features(window)
     if method.lower() == "shap":
         result = explain_window_shap(scaled_window, top_k=22)
@@ -157,7 +152,6 @@ def _render_explain_html(session: dict, result: dict, attributions: list) -> str
     if max_imp == 0.0:
         max_imp = 1.0
 
-    # Build Bars HTML
     bars_html = ""
     table_rows = ""
     for idx, a in enumerate(attributions, 1):

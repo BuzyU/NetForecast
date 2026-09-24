@@ -48,19 +48,10 @@ from pipeline_fixed import (  # noqa: E402
     compute_metrics,
     three_way_split,
 )
-# build_sequences is intentionally NOT imported from pipeline_fixed here: this
-# file defines its own copy inside main() (with an empty-input guard the
-# production version doesn't need). Importing the same name would just be
-# shadowed by that local def and mislead a reader into thinking it's shared.
 
 RAW_DIR = Path("data/raw_cicids")
 SEED = 42
 WINDOW = 6
-# The canonical 22, in the same order used everywhere else in this project
-# (backend/app/config.py FLOW_FEATURES). NOT derived from
-# FEATURE_CANDIDATES.keys() + extras -- that duplicated 8 names (FEATURE_CANDIDATES
-# already includes the flag-count/ratio features) and silently produced 30
-# "columns" with 8 duplicates, corrupting the scaler (NaN) on the first run.
 FLOW_FEATURES = [
     "flow_duration", "tot_fwd_pkts", "tot_bwd_pkts", "fwd_pkt_len_mean",
     "bwd_pkt_len_mean", "flow_bytes_s", "flow_pkts_s", "flow_iat_mean",
@@ -71,14 +62,13 @@ FLOW_FEATURES = [
 ]
 assert len(FLOW_FEATURES) == 22 and len(set(FLOW_FEATURES)) == 22
 
-# Files needed and the raw Label -> (stage, family) mapping we care about.
 FILES_AND_LABELS = {
     "Wednesday-workingHours.pcap_ISCX.csv": {
         "BENIGN": ("Benign", "Benign"),
         "DoS Hulk": ("C2", "DoS Hulk"),
         "DoS GoldenEye": ("C2", "DoS GoldenEye"),
         "DoS Slowhttptest": ("C2", "DoS Slowhttptest"),
-        "DoS slowloris": ("C2", "DoS slowloris"),  # HELD OUT
+        "DoS slowloris": ("C2", "DoS slowloris"),
     },
     "Tuesday-WorkingHours.pcap_ISCX.csv": {
         "BENIGN": ("Benign", "Benign"),
@@ -87,7 +77,7 @@ FILES_AND_LABELS = {
     },
     "Friday-WorkingHours-Morning.pcap_ISCX.csv": {
         "BENIGN": ("Benign", "Benign"),
-        "Bot": ("Reconnaissance", "Bot"),  # HELD OUT
+        "Bot": ("Reconnaissance", "Bot"),
     },
     "Friday-WorkingHours-Afternoon-PortScan.pcap_ISCX.csv": {
         "BENIGN": ("Benign", "Benign"),
@@ -98,14 +88,10 @@ FILES_AND_LABELS = {
         "DDoS": ("C2", "DDoS"),
     },
 }
-# Thursday-Morning-WebAttacks has mangled encoding on the em-dash; matched via prefix below.
 WEBATTACK_FILE = "Thursday-WorkingHours-Morning-WebAttacks.pcap_ISCX.csv"
 
 HELD_OUT_FAMILIES = {"DoS slowloris", "Bot", "Web Attack XSS"}
 
-# Cap benign rows per file so training stays fast (SIH pipeline already
-# validates full-scale training elsewhere; this experiment is about the
-# holdout methodology, not squeezing out another 0.1% F1).
 BENIGN_CAP_PER_FILE = 15000
 
 
@@ -141,23 +127,13 @@ def load_and_map(filepath: Path, label_map: dict) -> pd.DataFrame:
     df["stage_label"] = [m[0] for m in mapped]
     df["family_label"] = [m[1] for m in mapped]
 
-    # This official CIC-IDS2017 CICFlowMeter export has NO Source/Destination
-    # IP or Timestamp columns at all (confirmed by direct inspection) -- only
-    # flow statistics + Label. preprocess_cicids.py (the production script)
-    # already handles this by falling back to sequential 30-row chunking when
-    # IP columns are absent; this script does the same, rather than grouping
-    # by IP/time fields that don't exist (the first two versions of this
-    # script silently defaulted those to constants, collapsing nearly all
-    # rows into a handful of giant fake "sessions").
     df = df.reset_index(drop=True)
     df["_session_key"] = (np.arange(len(df)) // 30).astype(str) + "_" + filepath.name
-    df["_ts"] = np.arange(len(df))  # capture-order row index stands in for time
+    df["_ts"] = np.arange(len(df))
 
     if BENIGN_CAP_PER_FILE:
         benign_mask = df["stage_label"] == "Benign"
         benign_sessions = df.loc[benign_mask, "_session_key"].unique()
-        # Keep whole sessions until the row budget is used up, preserving
-        # each kept session's full row sequence intact.
         rng = np.random.RandomState(SEED)
         shuffled_sessions = rng.permutation(benign_sessions)
         session_sizes = df.loc[benign_mask].groupby("_session_key").size()
@@ -170,16 +146,11 @@ def load_and_map(filepath: Path, label_map: dict) -> pd.DataFrame:
         keep_mask = benign_mask & df["_session_key"].isin(keep_sessions)
         df = df[keep_mask | ~benign_mask].copy()
 
-    # FEATURE_CANDIDATES (imported from preprocess_cicids.py, the same mapping
-    # used to build the production real_flows.csv) already covers 19 of the
-    # 22 features, using the correct CIC-IDS2017 CICFlowMeter column names.
     result = pd.DataFrame()
     for target_feat, candidates in FEATURE_CANDIDATES.items():
         col = next((c for c in candidates if c in df.columns), None)
         result[target_feat] = pd.to_numeric(df[col], errors="coerce").fillna(0.0) if col else 0.0
 
-    # The remaining 3 aren't in FEATURE_CANDIDATES (not present in this
-    # CICFlowMeter version's output either, same as the production pipeline).
     result["ttl_variance"] = 0.0
     result["tcp_win_size"] = pd.to_numeric(
         df.get("Init_Win_bytes_forward", 0.0), errors="coerce"
@@ -188,14 +159,8 @@ def load_and_map(filepath: Path, label_map: dict) -> pd.DataFrame:
 
     missing = set(FLOW_FEATURES) - set(result.columns)
     assert not missing, f"load_and_map produced columns missing {missing}"
-    result = result[FLOW_FEATURES]  # enforce canonical order, no duplicates possible
+    result = result[FLOW_FEATURES]
 
-    # CIC-IDS2017's raw CSVs contain literal "Infinity" values (0-duration
-    # flows produce infinite Flow Bytes/s etc.) -- pd.to_numeric happily
-    # parses those as real inf, which silently poisons StandardScaler's mean
-    # (inf - inf = NaN) for the whole column. preprocess_cicids.py (the
-    # production script) already guards against this; this script needs the
-    # same guard.
     result = result.replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
     result["session_key"] = df["_session_key"].values
@@ -268,7 +233,7 @@ def main():
                 yn.append(feats[i + window])
                 ym.append(mal[i + window])
                 ys.append(stage[i + window])
-        if not X:  # explicit shape so downstream .shape[1:]/DataLoader usage doesn't break
+        if not X:
             n_feat = len(FLOW_FEATURES)
             return (np.zeros((0, window, n_feat), dtype=np.float32), np.zeros((0, n_feat), dtype=np.float32),
                     np.zeros((0,), dtype=np.float32), np.zeros((0,), dtype=np.int64))
@@ -280,8 +245,6 @@ def main():
     X_test, yn_test, ym_test, ys_test = sort_and_seq(test_df)
     print(f"\nTrain sequences: {X_train.shape}  Val: {X_val.shape}  Test: {X_test.shape}")
 
-    # Held-out family sequences: build sessions independently per family so
-    # short single-family sessions still yield windows where possible.
     X_hold, yn_hold, ym_hold, ys_hold, fam_hold = [], [], [], [], []
     for fam, g in holdout_df.groupby("family_label"):
         Xh, ynh, ymh, ysh = sort_and_seq(g)

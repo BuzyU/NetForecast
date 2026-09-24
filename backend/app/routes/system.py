@@ -24,7 +24,7 @@ router = APIRouter(prefix="/system", tags=["System"])
 
 
 class SystemState:
-    mode: str = "live"  # "live" (strict real packets only) | "simulated" (simulator allowed)
+    mode: str = "live"
     simulator_proc: Optional[subprocess.Popen] = None
 
     @classmethod
@@ -52,7 +52,7 @@ class SystemState:
 
 
 class ModeUpdateRequest(BaseModel):
-    mode: str  # "live" | "simulated"
+    mode: str
 
 
 @router.get("/mode")
@@ -113,7 +113,6 @@ async def start_simulator(speed: float = 1.0, sessions: int = 4):
             "pid": SystemState.simulator_proc.pid if SystemState.simulator_proc else None,
         }
 
-    # Resolve path to demo/traffic_simulator.py
     backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     project_root = os.path.dirname(backend_dir)
     sim_script = os.path.join(project_root, "demo", "traffic_simulator.py")
@@ -159,7 +158,6 @@ async def purge_simulated_data(db: AsyncSession = Depends(get_db)):
     Delete all simulated flows, sessions, and alerts from the database.
     Leaves real live capture and CSV data completely untouched.
     """
-    # 1. Find all simulated session keys
     from sqlalchemy import select
     res = await db.execute(select(SessionDB.session_key).where(SessionDB.source == "simulated"))
     sim_keys = [r[0] for r in res.all()]
@@ -169,17 +167,14 @@ async def purge_simulated_data(db: AsyncSession = Depends(get_db)):
     deleted_sessions = 0
 
     if sim_keys:
-        # Delete alerts tied to simulated sessions
         stmt_alerts = delete(AlertDB).where(AlertDB.session_key.in_(sim_keys))
         del_a = await db.execute(stmt_alerts)
         deleted_alerts = del_a.rowcount or 0
 
-    # Delete flows marked simulated
     stmt_flows = delete(FlowRecordDB).where(FlowRecordDB.source == "simulated")
     del_f = await db.execute(stmt_flows)
     deleted_flows = del_f.rowcount or 0
 
-    # Delete sessions marked simulated
     stmt_sessions = delete(SessionDB).where(SessionDB.source == "simulated")
     del_s = await db.execute(stmt_sessions)
     deleted_sessions = del_s.rowcount or 0
@@ -199,9 +194,6 @@ async def purge_simulated_data(db: AsyncSession = Depends(get_db)):
     }
 
 
-# ═══════════════════════════════════════════════════════════════
-# CYCLE MANAGEMENT & WELLBEING ARCHIVAL
-# ═══════════════════════════════════════════════════════════════
 ARCHIVE_DIR = DB_DIR / "archives"
 ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -239,7 +231,6 @@ def _compute_wellbeing_score(total_flows: int, alerts: list, max_stage: str) -> 
 
     score = 100.0
 
-    # Severity penalties
     for a in alerts:
         sev = (a.get("severity") or "").lower()
         if sev == "critical":
@@ -251,7 +242,6 @@ def _compute_wellbeing_score(total_flows: int, alerts: list, max_stage: str) -> 
         elif sev == "low":
             score -= 1.0
 
-    # Stage penalty
     stage_penalties = {
         "Exfiltration": 35.0,
         "C2": 25.0,
@@ -278,15 +268,12 @@ async def archive_and_reset_cycle(db: AsyncSession, reason: str = "manual") -> d
     CycleState.ensure_initialized()
     archive_id = CycleState.cycle_id
 
-    # 1. Fetch current sessions
     sess_res = await db.execute(select(SessionDB))
     sessions = sess_res.scalars().all()
 
-    # 2. Fetch current alerts
     alert_res = await db.execute(select(AlertDB))
     alerts = alert_res.scalars().all()
 
-    # 3. Flow count & max stage
     flow_cnt_res = await db.execute(select(func.count(FlowRecordDB.id)))
     total_flows = flow_cnt_res.scalar() or 0
 
@@ -355,7 +342,6 @@ async def archive_and_reset_cycle(db: AsyncSession, reason: str = "manual") -> d
         "alerts": alerts_data,
     }
 
-    # Write archive only if there was actual data or on explicit manual reset
     if total_flows > 0 or len(sessions_data) > 0 or reason == "manual":
         archive_file = ARCHIVE_DIR / f"{archive_id}.json"
         try:
@@ -366,16 +352,13 @@ async def archive_and_reset_cycle(db: AsyncSession, reason: str = "manual") -> d
         except Exception as e:
             logger.error("Failed to write cycle archive: %s", e)
 
-    # Reset active tables
     await db.execute(delete(FlowRecordDB))
     await db.execute(delete(SessionDB))
     await db.execute(delete(AlertDB))
     await db.commit()
 
-    # Clear in-memory buffers
     _session_buffers.clear()
 
-    # Start new cycle
     new_cycle_id = CycleState.initialize(force=True)
 
     logger.info("Initialized fresh cycle: %s", new_cycle_id)

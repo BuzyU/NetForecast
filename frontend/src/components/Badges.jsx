@@ -12,7 +12,6 @@ const SOURCE_LABELS = {
   api: { label: 'API INGEST', color: 'var(--text-secondary)', icon: Zap },
 };
 
-// Direction badge (IN / OUT / INT)
 export const DirBadge = memo(function DirBadge({ dir }) {
   const cfg = {
     inbound:  { label: 'IN',  color: '#c0392b', icon: ArrowDownToLine },
@@ -33,7 +32,6 @@ export const DirBadge = memo(function DirBadge({ dir }) {
   );
 });
 
-// Host vs Peer Identity badge
 export const IdentityBadge = memo(function IdentityBadge({ identity }) {
   if (!identity || identity === 'UNKNOWN') return null;
   const cfg = {
@@ -45,7 +43,6 @@ export const IdentityBadge = memo(function IdentityBadge({ identity }) {
   return <span className={`id-badge ${cfg.class}`} title={cfg.title}>{cfg.label}</span>;
 });
 
-// Application & Process badge with icon
 export const AppBadge = memo(function AppBadge({ name: propName, appName, processName, iconType }) {
   const name = propName || appName || processName || 'General Net';
   const nameLower = name.toLowerCase();
@@ -86,7 +83,6 @@ export const AppBadge = memo(function AppBadge({ name: propName, appName, proces
   );
 });
 
-// Packet and Bandwidth breakdown
 export const PacketStat = memo(function PacketStat({ fwdPkts, bwdPkts, bytesPerSec, proto }) {
   const tx = Math.round(fwdPkts || 0);
   const rx = Math.round(bwdPkts || 0);
@@ -103,7 +99,6 @@ export const PacketStat = memo(function PacketStat({ fwdPkts, bwdPkts, bytesPerS
   );
 });
 
-// Source badge
 export const SourceBadge = memo(function SourceBadge({ src }) {
   const cfg = SOURCE_LABELS[src] || SOURCE_LABELS.api;
   const Icon = cfg.icon;
@@ -118,7 +113,6 @@ export const SourceBadge = memo(function SourceBadge({ src }) {
   );
 });
 
-// Compromise pulse — visual overlay for sessions in active attack stage
 export const CompromiseIndicator = memo(function CompromiseIndicator({ stage, riskScore }) {
   const isCompromised = stageIndex(stage) >= 3 && (riskScore || 0) > 0.5;
   const isExfil = stage === 'Exfiltration';
@@ -136,7 +130,6 @@ export const CompromiseIndicator = memo(function CompromiseIndicator({ stage, ri
   );
 });
 
-// Full Kill Chain progression bar
 export const KillChain = memo(function KillChain({ currentStage, forecastStages = [] }) {
   const currentIdx = stageIndex(currentStage);
   const forecastIdxSet = new Set(forecastStages.map(s => stageIndex(s)));
@@ -168,7 +161,6 @@ export const KillChain = memo(function KillChain({ currentStage, forecastStages 
   );
 });
 
-// Compact Kill Chain for session table rows
 export const KillChainCompact = memo(function KillChainCompact({ currentStage }) {
   const currentIdx = stageIndex(currentStage);
   return (
@@ -183,7 +175,6 @@ export const KillChainCompact = memo(function KillChainCompact({ currentStage })
   );
 });
 
-// Network Wellbeing & Audit History Modal
 export function WellbeingModal({ isOpen, onClose }) {
   const [cycles, setCycles] = useState([]);
   const [loading, setLoading] = useState(true);

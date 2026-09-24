@@ -6,21 +6,12 @@ import { DirBadge, SourceBadge } from './Badges';
 function LiveLogsView({ lines = [], connected = false }) {
   const containerRef = useRef(null);
 
-  // Only surface flows the model has actually flagged as an attack — this
-  // is a security monitoring feed, not a packet sniffer dump. Benign
-  // traffic flowing normally isn't something an analyst needs to read
-  // one row at a time.
   const attackLines = useMemo(() => lines.filter(isAttackFlow), [lines]);
 
-  // Auto-scroll only when a genuinely new top row has appeared — `lines`
-  // gets a brand-new array reference on every WebSocket message (attack or
-  // not), so keying the effect on `attackLines` itself would reset scroll
-  // position on every single benign flow too, yanking an analyst's view
-  // away mid-read. Track the top row's own identity instead.
   const topKey = attackLines[0] ? `${attackLines[0]._ts || attackLines[0].timestamp}-${attackLines[0].src_ip}-${attackLines[0].dst_ip}` : null;
   useEffect(() => {
     if (containerRef.current) {
-      containerRef.current.scrollTop = 0; // newest-first list, keep pinned to top
+      containerRef.current.scrollTop = 0;
     }
   }, [topKey]);
 

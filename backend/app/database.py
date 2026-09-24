@@ -41,10 +41,8 @@ class FlowRecordDB(Base):
     dst_ip = Column(String(45), nullable=True)
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    # Data provenance tag (§7 — simulation vs live vs upload)
     source = Column(String(32), nullable=True, default="api")
 
-    # Network endpoint & process metadata
     src_port = Column(Integer, nullable=True)
     dst_port = Column(Integer, nullable=True)
     protocol = Column(String(16), nullable=True, default="TCP")
@@ -54,7 +52,6 @@ class FlowRecordDB(Base):
     src_identity = Column(String(32), nullable=True)
     dst_identity = Column(String(32), nullable=True)
 
-    # All 22 features (stored raw, pre-scaling)
     flow_duration = Column(Float)
     tot_fwd_pkts = Column(Float)
     tot_bwd_pkts = Column(Float)
@@ -78,7 +75,6 @@ class FlowRecordDB(Base):
     tcp_win_size = Column(Float)
     retransmit_cnt = Column(Float)
 
-    # Prediction results (filled after inference)
     infiltration_prob = Column(Float, nullable=True)
     predicted_stage = Column(String(32), nullable=True)
 
@@ -94,13 +90,10 @@ class SessionDB(Base):
     latest_risk_score = Column(Float, default=0.0)
     latest_stage = Column(String(32), default="Benign")
 
-    # Monotonic furthest stage (never moves backward — BUG fix for kill-chain flapping)
     max_stage_reached = Column(String(32), default="Benign")
 
-    # Traffic direction classification (§11A, §12 — RFC1918 based)
-    direction = Column(String(16), default="unknown")  # "inbound"|"outbound"|"internal"|"unknown"
+    direction = Column(String(16), default="unknown")
 
-    # Application and host identity
     process_name = Column(String(64), nullable=True)
     app_name = Column(String(64), nullable=True)
     tot_fwd_pkts = Column(Float, default=0.0)
@@ -108,7 +101,6 @@ class SessionDB(Base):
     src_identity = Column(String(32), nullable=True)
     dst_identity = Column(String(32), nullable=True)
 
-    # Data provenance (§7)
     source = Column(String(32), nullable=True, default="api")
 
     first_seen = Column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -120,7 +112,7 @@ class AlertDB(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     session_key = Column(String(128), index=True, nullable=False)
-    severity = Column(String(16), nullable=False)  # critical, high, medium, low
+    severity = Column(String(16), nullable=False)
     infiltration_prob = Column(Float, nullable=False)
     predicted_stage = Column(String(32), nullable=False)
     recommended_action = Column(Text, nullable=False)
@@ -128,7 +120,6 @@ class AlertDB(Base):
     acknowledged = Column(Boolean, default=False)
 
 
-# ── Engine + session factory ──────────────────────────────────────────
 engine = create_async_engine(DATABASE_URL, echo=False)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 

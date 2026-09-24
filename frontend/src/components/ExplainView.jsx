@@ -10,7 +10,7 @@ export default function ExplainView({ featureList }) {
   const [explanation, setExplanation] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [method, setMethod] = useState('gradient'); // Default to fast gradient for instant UI responsiveness
+  const [method, setMethod] = useState('gradient');
   const [searchQuery, setSearchQuery] = useState('');
 
   const featOrder = featureList || DEFAULT_FEAT_ORDER;
@@ -25,11 +25,10 @@ export default function ExplainView({ featureList }) {
         if (!flows || flows.length === 0) {
           throw new Error('No flow records captured for this session yet.');
         }
-        let windowFlows = flows.slice(0, 6).reverse();
-        // Pad window up to 6 flows if session has fewer than 6 flows
-        while (windowFlows.length < 6) {
-          windowFlows.unshift(windowFlows[0]);
+        if (flows.length < 6) {
+          throw new Error(`Collecting baseline: ${flows.length}/6 flows. The world model needs a full 6-flow window of real observations before it can explain a prediction.`);
         }
+        const windowFlows = flows.slice(0, 6).reverse();
         const window = windowFlows.map(f => featOrder.map(k => f.features?.[k] ?? 0));
         return apiPost('/explain', { window, top_k: 22, needs_scaling: true, method: methodToUse });
       })
@@ -88,7 +87,6 @@ export default function ExplainView({ featureList }) {
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 'var(--sp-4)' }}>
-      {/* Session picker */}
       <div className="panel">
         <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span className="panel-title">SELECT_SESSION</span>
@@ -150,7 +148,6 @@ export default function ExplainView({ featureList }) {
         </div>
       </div>
 
-      {/* Attribution display */}
       <div className="panel">
         <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--sp-2)' }}>
           <div>
@@ -179,7 +176,6 @@ export default function ExplainView({ featureList }) {
               </button>
             </div>
 
-            {/* Export Toolbar */}
             <div style={{ display: 'inline-flex', gap: 4 }}>
               <button
                 className="btn btn-sm"

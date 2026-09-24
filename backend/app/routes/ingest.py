@@ -67,9 +67,8 @@ async def ingest_csv(
     errors = []
     alerts_generated = 0
 
-    for row_num, row in enumerate(reader, start=2):  # row 1 is header
+    for row_num, row in enumerate(reader, start=2):
         try:
-            # Build FlowRecord from CSV row
             flow_data = {}
             for feat in FLOW_FEATURES:
                 val = row.get(feat)
@@ -99,7 +98,7 @@ async def ingest_csv(
 
         except (ValueError, TypeError, KeyError) as e:
             rejected += 1
-            if len(errors) < 20:  # cap error messages
+            if len(errors) < 20:
                 errors.append(f"Row {row_num}: {str(e)}")
 
     return IngestResponse(

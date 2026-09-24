@@ -8,7 +8,6 @@ import sys
 import numpy as np
 import pytest
 
-# Add backend to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.config import HIDDEN_SIZE, N_FEATURES, N_STAGES, NUM_LSTM_LAYERS, STAGES, WINDOW_SIZE
@@ -36,7 +35,6 @@ class TestModelLoading:
     def test_model_architecture(self):
         model = artifacts.model
         assert isinstance(model, WorldModel)
-        # Check LSTM input size, hidden size, and layers
         assert model.lstm.input_size == N_FEATURES
         assert model.lstm.hidden_size == HIDDEN_SIZE
         assert model.lstm.num_layers == NUM_LSTM_LAYERS
@@ -114,7 +112,7 @@ class TestForecast:
         probs = [0.9, 0.3, 0.7, 0.5, 0.8]
         smoothed = ema_smooth(probs)
         assert len(smoothed) == len(probs)
-        assert smoothed[0] == probs[0]  # first element unchanged
+        assert smoothed[0] == probs[0]
         for p in smoothed:
             assert 0.0 <= p <= 1.0
             assert np.isfinite(p)

@@ -19,7 +19,6 @@ from .config import (
 )
 
 
-# ── Flow record (single row of 22 features) ──────────────────────────
 class FlowRecord(BaseModel):
     """A single network flow with all 22 CIC-IDS features + optional metadata."""
     flow_duration: float
@@ -45,7 +44,6 @@ class FlowRecord(BaseModel):
     tcp_win_size: float
     retransmit_cnt: float
 
-    # Optional metadata for session grouping + data provenance
     src_ip: Optional[str] = None
     dst_ip: Optional[str] = None
     src_port: Optional[int] = None
@@ -57,7 +55,6 @@ class FlowRecord(BaseModel):
     src_identity: Optional[str] = None
     dst_identity: Optional[str] = None
     timestamp: Optional[datetime] = None
-    # §7: tag the origin of this flow so the UI can show a SIMULATION banner
     source: Optional[str] = Field(
         default="api",
         description='Origin of this flow: "live_capture", "simulated", "csv_upload", or "api"',
@@ -81,14 +78,11 @@ class FlowRecord(BaseModel):
         val = str(v).strip()
         if not val:
             return None
-        # Explicit allowlist of non-IP placeholders used in telemetry & session grouping
         if val.lower() in ("unknown", "?", "—", "-", "none", "null", "localhost", "broadcast"):
             return val
 
-        # Handle bracketed IPv6 e.g. "[2001:db8::1]:8080" or "[::1]"
         if val.startswith("[") and "]" in val:
             val = val[1:val.index("]")]
-        # Handle trailing port on IPv4 e.g. "192.168.1.1:80"
         elif ":" in val and val.count(":") == 1:
             val = val.split(":")[0]
 
@@ -106,7 +100,6 @@ class FlowRecord(BaseModel):
         return [getattr(self, f) for f in FLOW_FEATURES]
 
 
-# ── Prediction request/response ──────────────────────────────────────
 class PredictRequest(BaseModel):
     """A window of 6 flow records for single-step prediction."""
     window: list[list[float]] = Field(
@@ -140,7 +133,6 @@ class PredictResponse(BaseModel):
     threshold: float
 
 
-# ── Forecast request/response ────────────────────────────────────────
 class ForecastRequest(BaseModel):
     window: list[list[float]]
     k_steps: int = Field(default=DEFAULT_K_STEPS, ge=1, le=20)
@@ -175,7 +167,6 @@ class ForecastResponse(BaseModel):
     alert_at_step: Optional[int] = None
 
 
-# ── Explain request/response ─────────────────────────────────────────
 class ExplainRequest(BaseModel):
     window: list[list[float]]
     top_k: int = Field(default=10, ge=1, le=22)
@@ -200,7 +191,7 @@ class ExplainRequest(BaseModel):
 class FeatureAttribution(BaseModel):
     feature: str
     importance: float
-    direction: str  # "malicious" or "benign"
+    direction: str
 
 
 class ExplainResponse(BaseModel):
@@ -210,11 +201,10 @@ class ExplainResponse(BaseModel):
     method_used: str = "shap"
 
 
-# ── Alert models ─────────────────────────────────────────────────────
 class AlertOut(BaseModel):
     id: int
     session_key: str
-    severity: str  # "critical", "high", "medium", "low"
+    severity: str
     infiltration_prob: float
     predicted_stage: str
     recommended_action: str
@@ -224,7 +214,6 @@ class AlertOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-# ── Ingest response ──────────────────────────────────────────────────
 class SingleFlowIngestResponse(BaseModel):
     session_key: str
     buffer_size: int
@@ -240,14 +229,13 @@ class IngestResponse(BaseModel):
     alerts_generated: int
 
 
-# ── Health check ─────────────────────────────────────────────────────
 class HealthResponse(BaseModel):
-    status: str  # "ok" or "degraded"
+    status: str
     model_loaded: bool
     db_connected: bool
     artifacts_path: str
     features_count: int
-    features: list[str]  # BUG-08: ordered feature list for frontend to consume
+    features: list[str]
     stages: list[str]
     device: str
     system_mode: Optional[str] = "live"
@@ -260,9 +248,3 @@ class HealthResponse(BaseModel):
     window_size: Optional[int] = None
 
 
-# ── WebSocket messages ───────────────────────────────────────────────
-# Note: LiveFlowEvent was previously defined but unused.
-# The broadcast payload is now a plain dict emitted from live.py::broadcast().
-# Structure: {type, session_key, src_ip, dst_ip, direction, source,
-#              flow_count, infiltration_prob, predicted_stage,
-#              max_stage_reached, alert, timestamp}

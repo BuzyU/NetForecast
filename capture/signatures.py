@@ -11,12 +11,8 @@ no learning required, so we detect it with a rule rather than pretending an
 LSTM trained on 2 examples can do it.
 """
 
-# TLS record content types
 _TLS_CONTENT_TYPE_HEARTBEAT = 24
 
-# Tolerance for legitimate padding/alignment in the heartbeat payload —
-# real heartbeat responses are the request payload length plus a small
-# amount of padding (RFC 6520 requires >=16 bytes of random padding).
 _PADDING_TOLERANCE = 16
 
 
@@ -50,16 +46,12 @@ def detect_heartbleed(payload: bytes) -> bool:
         record_length = (payload[i + 3] << 8) | payload[i + 4]
 
         if record_length == 0 or i + 5 + record_length > n + _PADDING_TOLERANCE:
-            # Malformed/truncated record framing (or payload doesn't fully
-            # contain this record, e.g. TCP segmentation) — stop scanning
-            # this payload rather than risk misreading subsequent bytes.
             break
 
         if content_type == _TLS_CONTENT_TYPE_HEARTBEAT:
             fragment = payload[i + 5:i + 5 + record_length]
             if len(fragment) >= 3:
                 claimed_payload_len = (fragment[1] << 8) | fragment[2]
-                # Bytes actually present after the 1-byte type + 2-byte length header
                 actually_present = len(fragment) - 3
                 if claimed_payload_len > actually_present + _PADDING_TOLERANCE:
                     return True

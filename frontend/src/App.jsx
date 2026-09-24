@@ -17,37 +17,28 @@ import { SettingsView } from './components/SettingsPanel';
 import { IngestPanel } from './components/UploadPanel';
 import './index.css';
 
-// ═══════════════════════════════════════════════════════════════
-// APP SHELL
-// ═══════════════════════════════════════════════════════════════
 export default function App() {
   const [view, setView] = useState('dashboard');
   const [health, setHealth] = useState(null);
   const [alertCount, setAlertCount] = useState(0);
   const [selectedSession, setSelectedSession] = useState(null);
   const [clock, setClock] = useState(new Date());
-  // Feature order from backend — avoids hardcoded copies
   const [featureList, setFeatureList] = useState(null);
   const [systemMode, setSystemMode] = useState('live');
   const [simulatorRunning, setSimulatorRunning] = useState(false);
 
-  // Live flows and cycle management (persists across navigation)
   const [liveFlows, setLiveFlows] = useState([]);
-  // Real-time views (Live Logs, Dashboard's Real-Time Flows tab) show only
-  // flagged attacks, not the raw benign firehose — see LiveLogsView.
   const attackFlows = useMemo(() => liveFlows.filter(isAttackFlow), [liveFlows]);
   const [wsConnected, setWsConnected] = useState(false);
   const [hostIdentity, setHostIdentity] = useState(null);
   const [currentCycle, setCurrentCycle] = useState(null);
   const [wellbeingOpen, setWellbeingOpen] = useState(false);
 
-  // Live clock
   useEffect(() => {
     const t = setInterval(() => setClock(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
 
-  // Root WebSocket for persistent live flow stream
   useEffect(() => {
     const ws = createWebSocket();
     ws.onopen = () => setWsConnected(true);
@@ -65,7 +56,7 @@ export default function App() {
         if (data.alert) {
           setAlertCount(c => c + 1);
         }
-      } catch { /* ignore non-JSON */ }
+      } catch {}
     };
 
     const pingIv = setInterval(() => {
@@ -92,7 +83,6 @@ export default function App() {
     apiFetch('/system/cycle/current').then(setCurrentCycle).catch(() => {});
   }, []);
 
-  // Health + alert polling + system mode + host/cycle
   useEffect(() => {
     const updateHealth = (h) => {
       setHealth(h);
@@ -197,7 +187,6 @@ export default function App() {
 
   return (
     <div className="app-layout">
-      {/* ── Sidebar ── */}
       <nav className="sidebar">
         <div className="sidebar-brand">
           <h1>Project Garud</h1>
@@ -251,13 +240,11 @@ export default function App() {
         </div>
       </nav>
 
-      {/* ── Header / Command Bar ── */}
       <header className="header">
         <span className="header-breadcrumb">
           SYS_VIEW // <span className="view-name">[{viewLabels[view] || view.toUpperCase()}]</span>
         </span>
         <div className="header-right">
-          {/* Host identity */}
           {hostIdentity && (
             <div className="host-badge-chip" title={`Adapters: ${hostIdentity.interfaces?.map(i => `${i.name} (${i.ip})`).join(', ')}`}>
               <Laptop size={11} color="#27ae60"/>
@@ -265,7 +252,6 @@ export default function App() {
             </div>
           )}
 
-          {/* Current cycle */}
           {currentCycle && (
             <div className="cycle-chip" title={`Started at ${formatTime(currentCycle.started_at)}`}>
               <Activity size={11}/>
@@ -305,7 +291,6 @@ export default function App() {
         </div>
       </header>
 
-      {/* ── Main ── */}
       <main className="main-content">
         {view === 'dashboard' && (
           <Dashboard
@@ -335,10 +320,8 @@ export default function App() {
         )}
       </main>
 
-      {/* Wellbeing Audit Modal */}
       <WellbeingModal isOpen={wellbeingOpen} onClose={() => setWellbeingOpen(false)}/>
 
-      {/* ── Footer ── */}
       <footer className="footer">
         <span>Project Garud v1.0 // SIH 2026 PS26153 (Team Code 4 Change)</span>
         <span>LSTM World Model // {health?.features_count || 22} Features // Window={health?.stages?.length || 6}</span>

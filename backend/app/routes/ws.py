@@ -151,15 +151,12 @@ async def dashboard_stats(db: AsyncSession = Depends(get_db)):
         )
     )
 
-    # Check if any simulated data is present (§7 — data-provenance labeling)
-    # BUG FIX: Only flag simulated data active if system is actually in simulated mode
     from .system import SystemState
     sim_count = await db.execute(
         select(func.count(SessionDB.id)).where(SessionDB.source == "simulated")
     )
     has_simulated = (SystemState.mode == "simulated") and ((sim_count.scalar() or 0) > 0)
 
-    # Direction breakdown — consolidated in a single query with group_by
     dir_rows = await db.execute(
         select(SessionDB.direction, func.count(SessionDB.id)).group_by(SessionDB.direction)
     )

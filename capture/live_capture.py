@@ -165,7 +165,7 @@ class FlowExtractor:
         proto_map = {6: "TCP", 17: "UDP", 1: "ICMP"}
         features["protocol"] = proto_map.get(flow.protocol, str(flow.protocol))
         features["timestamp"] = datetime.now(timezone.utc).isoformat()
-        features["source"] = "live_capture"  # §7 provenance tag
+        features["source"] = "live_capture"
         features["heartbleed_signature"] = flow.heartbleed_detected
 
         try:

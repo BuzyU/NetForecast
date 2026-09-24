@@ -14,17 +14,12 @@ def _tls_record(content_type: int, fragment: bytes) -> bytes:
 
 
 def test_malicious_heartbleed_request_detected():
-    # Classic exploit shape: record claims only 3 bytes of fragment (just the
-    # heartbeat header, no real payload) but the heartbeat's own
-    # payload_length field claims 16384 bytes — the over-read primitive.
-    heartbeat_fragment = bytes([0x01, 0x40, 0x00])  # type=request, payload_length=16384
+    heartbeat_fragment = bytes([0x01, 0x40, 0x00])
     record = _tls_record(24, heartbeat_fragment)
     assert detect_heartbleed(record) is True
 
 
 def test_legitimate_heartbeat_not_flagged():
-    # A real heartbeat: payload_length matches the actual payload bytes present,
-    # plus RFC 6520 padding.
     real_payload = b"abc"
     padding = b"\x00" * 16
     heartbeat_fragment = bytes([0x01, 0x00, len(real_payload)]) + real_payload + padding
@@ -33,8 +28,6 @@ def test_legitimate_heartbeat_not_flagged():
 
 
 def test_non_heartbeat_tls_traffic_not_flagged():
-    # Ordinary TLS Application Data (content_type=23) must never trigger,
-    # regardless of its contents.
     record = _tls_record(23, b"\x01\xff\xff" + b"x" * 50)
     assert detect_heartbleed(record) is False
 

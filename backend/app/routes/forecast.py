@@ -58,7 +58,6 @@ async def _get_session_forecast(
     k_steps: int,
     db: AsyncSession,
 ) -> tuple[dict, dict]:
-    # 1. Fetch session
     sess_res = await db.execute(select(SessionDB).where(SessionDB.session_key == session_key))
     session = sess_res.scalar_one_or_none()
     if not session:
@@ -84,7 +83,6 @@ async def _get_session_forecast(
             "latest_stage": session.latest_stage or "Benign",
         }
 
-    # 2. Fetch flows
     flows_res = await db.execute(
         select(FlowRecordDB)
         .where(FlowRecordDB.session_key == session_key)
@@ -115,7 +113,6 @@ def _render_forecast_html(session: dict, result: dict) -> str:
     alert_triggered = result.get("alert_triggered", False)
     alert_at_step = result.get("alert_at_step")
 
-    # Step rows
     step_rows = ""
     for s in steps:
         prob = s["infiltration_prob_mean"]

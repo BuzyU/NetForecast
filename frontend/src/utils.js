@@ -1,4 +1,3 @@
-// ── Stage helpers ──────────────────────────────────────────────
 export const STAGES = ['Benign', 'Reconnaissance', 'Initial Access', 'Lateral Movement', 'C2', 'Exfiltration'];
 
 export const DEFAULT_FEAT_ORDER = [
@@ -39,7 +38,6 @@ export function stageColor(stage) {
   return map[stage] || '#8a7f72';
 }
 
-// MITRE ATT&CK technique reference per stage (matches README kill-chain table).
 export const STAGE_TECHNIQUE = {
   'Reconnaissance': 'T1595 / T1046',
   'Initial Access': 'T1190 / T1110',
@@ -48,13 +46,6 @@ export const STAGE_TECHNIQUE = {
   'Exfiltration': 'T1041 / T1048',
 };
 
-// ── Attack detection ────────────────────────────────────────────
-// Prefer the backend's own `is_alert` verdict when present -- it accounts
-// for the adaptive EMA+sigma threshold (which moves away from 0.5) and the
-// Heartbleed signature path, so it's authoritative in a way a hardcoded
-// 0.5 client-side check can never be. Fall back to the probability/stage
-// heuristic only for payloads that don't carry is_alert (e.g. session rows
-// from /sessions, which report latest_risk_score/latest_stage instead).
 export function isAttackFlow(flow) {
   if (!flow) return false;
   if (typeof flow.is_alert === 'boolean') return flow.is_alert;
@@ -63,7 +54,6 @@ export function isAttackFlow(flow) {
   return prob > 0.5 || (!!stage && stage !== 'Benign');
 }
 
-// ── Severity ──────────────────────────────────────────────────
 export function severityClass(prob) {
   if (prob >= 0.8) return 'critical';
   if (prob >= 0.6) return 'high';
@@ -71,7 +61,6 @@ export function severityClass(prob) {
   return 'low';
 }
 
-// ── Formatting ────────────────────────────────────────────────
 export function formatTime(isoString) {
   if (!isoString) return '\u2014';
   const d = new Date(isoString);
@@ -99,11 +88,9 @@ export function formatBytes(bytes) {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
-// flow_duration is stored in MICROSECONDS (live_capture.py: duration_us = ... * 1e6)
-// BUG-09b fix: was incorrectly treating input as milliseconds — divide by 1000 first
 export function formatDuration(us) {
   if (us == null) return '\u2014';
-  const ms = us / 1000;           // microseconds → milliseconds
+  const ms = us / 1000;
   if (ms < 1000) return ms.toFixed(0) + 'ms';
   if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
   return (ms / 60000).toFixed(1) + 'm';

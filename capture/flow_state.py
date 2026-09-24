@@ -132,9 +132,6 @@ class FlowState:
         total_bytes = self.fwd_bytes + self.bwd_bytes
         total_pkts = self.fwd_packets + self.bwd_packets
 
-        # Prevent sub-millisecond division artifacts where tiny packet bursts
-        # calculate synthetic rates of millions of pkts/sec.
-        # Enforce minimum 10ms (0.010s) window for rate calculation.
         effective_duration_sec = max(duration_us / 1e6, 0.01)
         effective_duration_us = max(duration_us, 10000.0)
 

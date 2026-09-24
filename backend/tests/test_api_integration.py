@@ -10,7 +10,6 @@ import sys
 import pytest
 from fastapi.testclient import TestClient
 
-# Add backend directory to sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from app.config import FLOW_FEATURES, N_FEATURES, STAGES, WINDOW_SIZE
@@ -94,22 +93,17 @@ def test_ingest_flow_updates_session(client: TestClient):
     assert "192.168.1.110->10.0.0.20" in data["session_key"]
     assert data["buffer_size"] >= 1
 
-    # Check sessions endpoint
     sess_res = client.get("/sessions")
     assert sess_res.status_code == 200
     sessions = sess_res.json()
     matching = [s for s in sessions if "192.168.1.110->10.0.0.20" in s["session_key"]]
     assert len(matching) > 0
 
-    # active_within_seconds should still include a session just created
     fresh_res = client.get("/sessions?active_within_seconds=300")
     assert fresh_res.status_code == 200
     fresh = [s for s in fresh_res.json() if "192.168.1.110->10.0.0.20" in s["session_key"]]
     assert len(fresh) > 0
 
-    # An impossibly small window should exclude everything (nothing is
-    # "active within the last 0 seconds") -- this is what the Dashboard's
-    # "Active Sessions" tab relies on to stop stale sessions from stacking up.
     stale_res = client.get("/sessions?active_within_seconds=1")
     assert stale_res.status_code == 200
     import time
@@ -144,7 +138,6 @@ def test_full_chain_ingest_alert_and_query(client: TestClient):
     src = "192.168.10.99"
     dst = "10.10.10.99"
 
-    # Ingest 6 high-intensity anomaly flows
     for _ in range(WINDOW_SIZE):
         flow = make_dummy_flow(src_ip=src, dst_ip=dst, multiplier=100.0)
         flow["retransmit_cnt"] = 50.0
@@ -152,7 +145,6 @@ def test_full_chain_ingest_alert_and_query(client: TestClient):
         res = client.post("/ingest", json=flow)
         assert res.status_code == 200
 
-    # Query alerts endpoint
     alerts_res = client.get("/alerts")
     assert alerts_res.status_code == 200
     alerts = alerts_res.json()
@@ -172,8 +164,8 @@ def test_heartbleed_signature_triggers_immediate_alert(client: TestClient):
     assert res.status_code == 200
     data = res.json()
 
-    assert data["buffer_size"] == 1  # window is nowhere near full yet
-    assert data["prediction"] is None  # ML path didn't run
+    assert data["buffer_size"] == 1
+    assert data["prediction"] is None
     assert data["heartbleed_alert"] is not None
     assert data["heartbleed_alert"]["severity"] == "critical"
     assert data["heartbleed_alert"]["predicted_stage"] == "Exfiltration"
@@ -214,23 +206,18 @@ def test_ingest_csv_batch_upload(client: TestClient):
 
 def test_ip_address_validation(client: TestClient):
     """Verify that invalid IP addresses are rejected with 422 while valid IPs and placeholders succeed."""
-    # Valid standard IPv4
     valid_flow = make_dummy_flow(src_ip="192.168.1.50", dst_ip="10.0.0.1")
     assert client.post("/ingest", json=valid_flow).status_code == 200
 
-    # Valid IPv6 and loopback
     v6_flow = make_dummy_flow(src_ip="::1", dst_ip="fe80::1")
     assert client.post("/ingest", json=v6_flow).status_code == 200
 
-    # Bracketed IPv6 and port-suffixed IPv4
     bracket_flow = make_dummy_flow(src_ip="[2001:db8::1]:8080", dst_ip="192.168.1.1:443")
     assert client.post("/ingest", json=bracket_flow).status_code == 200
 
-    # Legitimate non-IP placeholder tokens (e.g. unknown host discovery)
     placeholder_flow = make_dummy_flow(src_ip="unknown", dst_ip="localhost")
     assert client.post("/ingest", json=placeholder_flow).status_code == 200
 
-    # Genuinely invalid src_ip
     invalid_flow = make_dummy_flow(src_ip="not_an_ip_address", dst_ip="10.0.0.1")
     res_invalid = client.post("/ingest", json=invalid_flow)
     assert res_invalid.status_code == 422

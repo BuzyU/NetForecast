@@ -14,7 +14,6 @@ from fastapi import WebSocket
 
 logger = logging.getLogger(__name__)
 
-# Registry of all currently connected WebSocket clients
 _active_connections: Set[WebSocket] = set()
 
 

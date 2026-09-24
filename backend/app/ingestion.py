@@ -31,7 +31,7 @@ from .config import (
 )
 from .database import AlertDB, FlowRecordDB, SessionDB
 from .inference import predict_single
-from .live import broadcast  # BUG-01 fix
+from .live import broadcast
 from .model_loader import artifacts
 from .network_identity import classify_ip_identity
 from .process_resolver import resolve_process
@@ -39,15 +39,11 @@ from .schemas import FlowRecord
 
 logger = logging.getLogger(__name__)
 
-# ── In-memory buffer ──────────────────────────────────────────────────
-# Key: session_key  →  {"flows": [np.ndarray], "last_updated": datetime}
-# BUG-02 fix: each entry carries a timestamp so stale keys can be evicted.
 _session_buffers: dict[str, dict] = defaultdict(
     lambda: {"flows": [], "last_updated": datetime.now(timezone.utc)}
 )
 
-# BUG-02: evict buffer entries that haven't been touched for this many seconds
-_BUFFER_TTL_SECONDS = SESSION_TIME_BUCKET_SECONDS * 2  # 10 minutes
+_BUFFER_TTL_SECONDS = SESSION_TIME_BUCKET_SECONDS * 2
 
 
 def evict_stale_buffers():
@@ -65,7 +61,6 @@ def evict_stale_buffers():
     return len(stale)
 
 
-# ── RFC1918 private ranges (§11A) ──────────────────────────────────────
 _PRIVATE_NETS = [
     ipaddress.ip_network("10.0.0.0/8"),
     ipaddress.ip_network("172.16.0.0/12"),
@@ -95,9 +90,9 @@ def classify_direction(src_ip: Optional[str], dst_ip: Optional[str]) -> str:
     if src_private and dst_private:
         return "internal"
     elif not src_private and dst_private:
-        return "inbound"   # external → protected host
+        return "inbound"
     elif src_private and not dst_private:
-        return "outbound"  # protected host → external
+        return "outbound"
     return "unknown"
 
 
@@ -172,9 +167,6 @@ async def ingest_single_flow(
     if not artifacts.is_loaded:
         raise RuntimeError("Model not loaded — cannot ingest flows")
 
-    # ── Server-Side Feature Sanitization ──────────────────────────
-    # Guard against discrete packet burst division artifacts where sub-millisecond
-    # durations (<10ms) produce synthetic multi-million pkts/s rates.
     dur_us = float(getattr(flow, "flow_duration", 0.0) or 0.0)
     if dur_us < 10000.0 or getattr(flow, "flow_pkts_s", 0.0) > 100000.0:
         eff_dur_us = max(dur_us, 10000.0)
@@ -191,11 +183,9 @@ async def ingest_single_flow(
 
     raw_features = np.array([flow.to_feature_array()], dtype=np.float32)
 
-    # Validate no NaN/Inf
     if np.any(~np.isfinite(raw_features)):
         raise ValueError("Flow contains NaN or Inf values — rejected")
 
-    # Opportunistic buffer eviction (BUG-02 fix) — ~1% of requests trigger a sweep
     import random
     if random.random() < 0.01:
         evict_stale_buffers()
@@ -203,7 +193,6 @@ async def ingest_single_flow(
     session_key = derive_session_key(flow.src_ip, flow.dst_ip, flow.timestamp)
     source = getattr(flow, "source", None) or "api"
 
-    # ── Host vs Peer Identity & Direction Resolution ──────────────
     src_identity = classify_ip_identity(flow.src_ip)
     dst_identity = classify_ip_identity(flow.dst_ip)
 
@@ -220,13 +209,11 @@ async def ingest_single_flow(
         direction = classify_direction(flow.src_ip, flow.dst_ip)
         port_for_proc = getattr(flow, "src_port", None) or getattr(flow, "dst_port", None)
 
-    # ── Process & Application Resolution ──────────────────────────
     proc_info = resolve_process(port_for_proc, getattr(flow, "protocol", "TCP"))
     process_name = getattr(flow, "process_name", None) or proc_info.get("process_name")
     app_name = getattr(flow, "app_name", None) or proc_info.get("app_name")
     app_icon = proc_info.get("app_icon", "network")
 
-    # ── Store raw record ──────────────────────────────────────────
     db_record = FlowRecordDB(
         session_key=session_key,
         src_ip=flow.src_ip,
@@ -245,7 +232,6 @@ async def ingest_single_flow(
     )
     db.add(db_record)
 
-    # ── Update or create session ──────────────────────────────────
     result = await db.execute(
         select(SessionDB).where(SessionDB.session_key == session_key)
     )
@@ -290,13 +276,11 @@ async def ingest_single_flow(
         if not session.dst_identity and dst_identity:
             session.dst_identity = dst_identity
 
-    # ── Scale and buffer ──────────────────────────────────────────
     scaled = artifacts.scale_features(raw_features)[0]
     buf = _session_buffers[session_key]
     buf["flows"].append(scaled)
     buf["last_updated"] = now
 
-    # Keep only the latest WINDOW_SIZE flows (+ one extra for safety)
     if len(buf["flows"]) > WINDOW_SIZE * 2:
         buf["flows"] = buf["flows"][-WINDOW_SIZE:]
 
@@ -308,15 +292,6 @@ async def ingest_single_flow(
         "heartbleed_alert": None,
     }
 
-    # ── Deterministic Heartbleed (CVE-2014-0160) signature override ───
-    # Independent of the ML window-based prediction below: a single malformed
-    # TLS Heartbeat record is a complete, self-contained exploit attempt and
-    # doesn't need W=6 flows of temporal context to be worth alerting on.
-    # This exists because real_flows.csv (CIC-IDS2017-derived) has only ~2
-    # real Exfiltration/Heartbleed examples to learn from — not enough for
-    # any model to reliably detect this from statistics alone — but the
-    # exploit has a deterministic wire-format signature that doesn't need to
-    # be learned at all. See capture/signatures.py.
     if getattr(flow, "heartbleed_signature", False):
         session.latest_risk_score = 1.0
         session.latest_stage = "Exfiltration"
@@ -349,7 +324,6 @@ async def ingest_single_flow(
             "signature": "heartbleed_cve_2014_0160",
         }
 
-    # ── Run prediction if window is full ──────────────────────────
     if len(buf["flows"]) >= WINDOW_SIZE:
         window = np.array(buf["flows"][-WINDOW_SIZE:], dtype=np.float32)
         prediction = predict_single(window)
@@ -357,21 +331,17 @@ async def ingest_single_flow(
 
         predicted_stage = prediction["predicted_stage"]
 
-        # Update session with latest prediction
         session.latest_risk_score = prediction["infiltration_probability"]
         session.latest_stage = predicted_stage
 
-        # Monotonic max_stage_reached (§5 kill-chain flapping fix)
         current_max_idx = _stage_index(session.max_stage_reached or "Benign")
         new_stage_idx = _stage_index(predicted_stage)
         if new_stage_idx > current_max_idx:
             session.max_stage_reached = predicted_stage
 
-        # Update the flow record with prediction
         db_record.infiltration_prob = prediction["infiltration_probability"]
         db_record.predicted_stage = predicted_stage
 
-        # ── Determine alert status (with Adaptive Threshold support) ──
         prob = prediction["infiltration_probability"]
         effective_threshold = DEFAULT_THRESHOLD
         is_alert = prediction["is_alert"]
@@ -394,7 +364,6 @@ async def ingest_single_flow(
         prediction["is_alert"] = is_alert
         prediction["effective_threshold"] = effective_threshold
 
-        # ── Create alert if threshold exceeded ────────────────────
         if is_alert:
             severity = _severity_from_prob(prob)
             action = _recommended_action(predicted_stage, session_key)
@@ -418,8 +387,6 @@ async def ingest_single_flow(
 
     await db.commit()
 
-    # ── Broadcast to live WebSocket clients (BUG-01 fix) ──────────
-    # Fire-and-forget: errors in broadcast must NOT prevent ingestion response.
     try:
         event_type = "alert" if (result_data["alert"] or result_data["heartbleed_alert"]) else (
             "prediction" if result_data["prediction"] else "flow_ingested"
@@ -444,11 +411,6 @@ async def ingest_single_flow(
             "flow_bytes_s": getattr(flow, "flow_bytes_s", 0.0),
             "flow_pkts_s": getattr(flow, "flow_pkts_s", 0.0),
             "flow_count": session.flow_count,
-            # The heartbleed signature path fires on the very first flow, before
-            # the 6-flow ML window is full (result_data["prediction"] is still
-            # None at that point) -- it must take priority here, or the "fires
-            # an immediate critical alert" signature detector becomes invisible
-            # to every consumer of this broadcast (frontend included).
             "infiltration_prob": (
                 result_data["heartbleed_alert"]["infiltration_prob"]
                 if result_data["heartbleed_alert"]

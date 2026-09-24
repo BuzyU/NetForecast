@@ -10,7 +10,6 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# RFC1918 private subnets + loopback + link-local
 _PRIVATE_NETS = [
     ipaddress.ip_network("127.0.0.0/8"),
     ipaddress.ip_network("10.0.0.0/8"),
@@ -23,7 +22,6 @@ _PRIVATE_NETS = [
 def _safe_ip_parse(ip_str: Optional[str]) -> Optional[ipaddress.IPv4Address | ipaddress.IPv6Address]:
     if not ip_str:
         return None
-    # Strip port if present
     clean_ip = ip_str.split(":")[0] if ":" in ip_str and not ip_str.count(":") > 1 else ip_str
     try:
         return ipaddress.ip_address(clean_ip)
@@ -41,7 +39,6 @@ def get_host_identity() -> dict:
     interfaces = []
     primary_ip = None
 
-    # 1. Probe primary outbound IP via UDP socket connect (does not send traffic)
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
@@ -51,7 +48,6 @@ def get_host_identity() -> dict:
     except Exception:
         pass
 
-    # 2. Hostname-based IPs
     try:
         _, _, host_ips = socket.gethostbyname_ex(hostname)
         for ip in host_ips:
@@ -60,7 +56,6 @@ def get_host_identity() -> dict:
     except Exception:
         pass
 
-    # 3. psutil network adapter inspection (if available)
     try:
         import psutil
         net_addrs = psutil.net_if_addrs()
@@ -84,7 +79,6 @@ def get_host_identity() -> dict:
         logger.debug("psutil adapter discovery skipped: %s", e)
 
     if not primary_ip:
-        # Fallback to first non-loopback IP
         for ip in local_ips:
             if not ip.startswith("127.") and ip != "::1":
                 primary_ip = ip
@@ -100,7 +94,6 @@ def get_host_identity() -> dict:
     }
 
 
-# Cache host identity so we don't query OS sockets on every single flow
 _CACHED_HOST_IDENTITY: Optional[dict] = None
 
 
@@ -129,11 +122,9 @@ def classify_ip_identity(ip_str: Optional[str]) -> str:
     if not parsed:
         return "UNKNOWN"
 
-    # Check if loopback
     if parsed.is_loopback:
         return "HOST"
 
-    # Check if private RFC1918 / link-local
     is_private = any(parsed in net for net in _PRIVATE_NETS)
     if is_private:
         return "LAN_PEER"

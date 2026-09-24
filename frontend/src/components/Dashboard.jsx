@@ -10,11 +10,8 @@ export default function Dashboard({ onSelectSession, systemMode, liveFlows = [],
   const [loading, setLoading] = useState(true);
   const [simBannerDismissed, setSimBannerDismissed] = useState(false);
   const [sortBy, setSortBy] = useState('last_seen');
-  const [dashboardTab, setDashboardTab] = useState('sessions'); // 'sessions' | 'live_flows'
+  const [dashboardTab, setDashboardTab] = useState('sessions');
 
-  // "Active" should mean currently active, not "ever seen this cycle" —
-  // a session idle for more than this is no longer shown here (it's still
-  // in the DB and fully visible in Reports' full audit, just not this view).
   const ACTIVE_WINDOW_SECONDS = 300;
 
   const refresh = useCallback(() => {
@@ -41,7 +38,6 @@ export default function Dashboard({ onSelectSession, systemMode, liveFlows = [],
 
   return (
     <>
-      {/* §7 — Simulation banner (BUG FIX: only show in simulated mode) */}
       {systemMode === 'simulated' && stats.has_simulated_data && !simBannerDismissed && (
         <div style={{
           background: 'linear-gradient(90deg, rgba(230,126,34,0.12), rgba(230,126,34,0.06))',
@@ -59,7 +55,6 @@ export default function Dashboard({ onSelectSession, systemMode, liveFlows = [],
         </div>
       )}
 
-      {/* Stats cards */}
       <div className="stats-bar">
         <div className="stat-card">
           <div className="stat-card-label">TOTAL_SESSIONS (CYCLE)</div>
@@ -70,11 +65,6 @@ export default function Dashboard({ onSelectSession, systemMode, liveFlows = [],
           <div className="stat-card-value">{stats.total_flows || 0}</div>
         </div>
         <div className="stat-card">
-          {/* Computed from the same time-filtered `sessions` list the table below
-              renders, not the backend's unfiltered all-cycle stat -- otherwise this
-              card can show a count with no matching rows visible anywhere (a session
-              that was at-risk then went idle drops out of the active table but not
-              out of the unfiltered backend count). */}
           <div className="stat-card-label">AT_RISK (ACTIVE)</div>
           <div className="stat-card-value" style={{ color: activeAtRisk > 0 ? 'var(--severity-critical)' : undefined }}>
             {activeAtRisk}
@@ -104,7 +94,6 @@ export default function Dashboard({ onSelectSession, systemMode, liveFlows = [],
         )}
       </div>
 
-      {/* View switcher and mode indication */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-2)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
           <div className="tab-group">
@@ -123,7 +112,6 @@ export default function Dashboard({ onSelectSession, systemMode, liveFlows = [],
           </div>
         </div>
 
-        {/* Operating mode badge */}
         <div style={{
           display: 'inline-flex',
           alignItems: 'center',
@@ -148,7 +136,6 @@ export default function Dashboard({ onSelectSession, systemMode, liveFlows = [],
         </div>
       </div>
 
-      {/* Delegated Session / Real-Time Flow Table */}
       <SessionTable
         sessions={sessions}
         loading={loading}

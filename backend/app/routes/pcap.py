@@ -15,7 +15,6 @@ from ..flow_state import FlowState
 from ..ingestion import ingest_single_flow
 from ..schemas import FlowRecord, IngestResponse
 
-# Backward compatibility alias
 PcapFlowState = FlowState
 
 logger = logging.getLogger(__name__)
@@ -48,7 +47,6 @@ async def ingest_pcap(
             detail="Scapy is not installed on the backend server",
         )
 
-    # Save to a temporary file for PcapReader streaming
     content = await file.read()
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pcap") as tmp:
         tmp.write(content)
@@ -92,7 +90,6 @@ async def ingest_pcap(
                 src_port = int(udp.sport)
                 dst_port = int(udp.dport)
 
-            # Canonical bidirectional key: (src, dst) ordered lexicographically
             if (src_ip, src_port) <= (dst_ip, dst_port):
                 key = f"{src_ip}:{src_port}-{dst_ip}:{dst_port}-{proto}"
                 is_fwd = True
@@ -129,7 +126,6 @@ async def ingest_pcap(
         except OSError:
             pass
 
-    # Process extracted flows
     for key, flow_state in flows.items():
         try:
             feat_dict = flow_state.to_features()

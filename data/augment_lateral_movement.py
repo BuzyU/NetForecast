@@ -101,7 +101,7 @@ def extract_infiltration(raw_dir: Path) -> pd.DataFrame:
     for fname in INFILTRATION_DAYS:
         path = raw_dir / fname.replace("_TrafficForML_CICFlowMeter", "")
         df = pd.read_csv(path, usecols=NEEDED_COLS, low_memory=False)
-        df = df[df["Label"] == "Infilteration"].copy()  # sic — CIC-IDS2018's own spelling
+        df = df[df["Label"] == "Infilteration"].copy()
         print(f"  {path.name}: {len(df)} Infilteration rows")
         frames.append(df)
     return pd.concat(frames, ignore_index=True)

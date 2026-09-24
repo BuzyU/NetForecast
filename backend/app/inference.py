@@ -195,7 +195,6 @@ def explain_window_shap(
     try:
         import shap
 
-        # Model prediction function: maps flat (N, 6 * 22) -> (N,) probabilities
         def predict_fn(flat_windows: np.ndarray) -> np.ndarray:
             x_tensor = torch.tensor(
                 flat_windows.reshape(-1, WINDOW_SIZE, N_FEATURES),
@@ -206,7 +205,6 @@ def explain_window_shap(
                 probs = torch.sigmoid(inf_logit).cpu().numpy()
             return probs
 
-        # Background reference: zero baseline
         background = np.zeros((1, WINDOW_SIZE * N_FEATURES), dtype=np.float32)
         explainer = shap.KernelExplainer(predict_fn, background)
 
@@ -220,7 +218,6 @@ def explain_window_shap(
         else:
             vals = shap_vals
 
-        # Reshape to (WINDOW_SIZE, N_FEATURES) and average across time steps
         val_grid = np.array(vals).reshape(WINDOW_SIZE, N_FEATURES)
         attributions = val_grid.mean(axis=0)
         method_used = "shap"

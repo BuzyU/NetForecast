@@ -30,7 +30,6 @@ def download_file(filename: str, dest_dir: Path, idx: int, total: int):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     req = urllib.request.Request(url, headers=headers)
 
-    # Get remote size
     try:
         with urllib.request.urlopen(req) as resp:
             total_bytes = int(resp.headers.get("Content-Length", 0))
@@ -38,7 +37,6 @@ def download_file(filename: str, dest_dir: Path, idx: int, total: int):
         print(f"[{idx}/{total}] ERROR getting info for {filename}: {e}")
         return False
 
-    # Check if already complete
     if dest_file.exists() and dest_file.stat().st_size == total_bytes:
         print(f"[{idx}/{total}] {filename} already downloaded ({total_bytes / (1024*1024):.2f} MB). Skipping.")
         return True
@@ -46,7 +44,7 @@ def download_file(filename: str, dest_dir: Path, idx: int, total: int):
     print(f"[{idx}/{total}] Downloading {filename} ({total_bytes / (1024*1024):.2f} MB)...")
     start_time = time.time()
     downloaded = 0
-    chunk_size = 1024 * 1024  # 1 MB
+    chunk_size = 1024 * 1024
 
     try:
         with urllib.request.urlopen(req) as resp, open(tmp_file, "wb") as out_f:
@@ -58,7 +56,6 @@ def download_file(filename: str, dest_dir: Path, idx: int, total: int):
                 out_f.write(chunk)
                 downloaded += len(chunk)
 
-                # Print progress every 1.5 seconds
                 now = time.time()
                 if now - last_print > 1.5 or downloaded == total_bytes:
                     pct = (downloaded / total_bytes * 100) if total_bytes > 0 else 0

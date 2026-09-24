@@ -6,7 +6,6 @@ when processing identical packet sequences.
 import os
 import sys
 
-# Ensure project root and backend are on sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -28,13 +27,6 @@ def test_identical_packets_produce_byte_identical_features():
     flow_a = LiveFlowState(src_ip="192.168.1.10", dst_ip="10.0.0.5", src_port=54321, dst_port=80, protocol=6)
     flow_b = BackendFlowState(src_ip="192.168.1.10", dst_ip="10.0.0.5", src_port=54321, dst_port=80, protocol=6)
 
-    # Packet sequence:
-    # 1. SYN (fwd, 64 bytes)
-    # 2. SYN-ACK (bwd, 64 bytes)
-    # 3. ACK (fwd, 54 bytes)
-    # 4. Data (fwd, 512 bytes, PSH-ACK)
-    # 5. ACK (bwd, 54 bytes)
-    # 6. Data (bwd, 1024 bytes)
     packets = [
         {"pkt_len": 64, "is_forward": True, "timestamp": 1000.0, "tcp_flags": 0x02, "ttl": 64, "tcp_win": 65535, "seq": 100},
         {"pkt_len": 64, "is_forward": False, "timestamp": 1000.005, "tcp_flags": 0x12, "ttl": 128, "tcp_win": 32768, "seq": 200},
@@ -77,7 +69,6 @@ def test_scapy_packet_pipeline_parity():
     pcap_flows: dict[str, PcapFlowState] = {}
     live_capturer = FlowExtractor(api_url="http://mock", flow_timeout=3600.0, min_packets=1)
 
-    # Sequence of 4 Scapy packets
     p1 = IP(src="192.168.1.50", dst="172.16.0.4", ttl=64) / TCP(sport=50000, dport=443, flags="S", seq=100, window=64240)
     p1.time = 1700000000.0
     p2 = IP(src="172.16.0.4", dst="192.168.1.50", ttl=128) / TCP(sport=443, dport=50000, flags="SA", seq=500, ack=101, window=32768)
@@ -89,11 +80,9 @@ def test_scapy_packet_pipeline_parity():
 
     scapy_packets = [p1, p2, p3, p4]
 
-    # Process through live capturer
     for pkt in scapy_packets:
         live_capturer.process_packet(pkt)
 
-    # Process through pcap.py logic
     for pkt in scapy_packets:
         ip = pkt[IP]
         src_ip = ip.src
@@ -135,7 +124,6 @@ def test_scapy_packet_pipeline_parity():
             seq=seq,
         )
 
-    # Assert exactly 1 flow key generated in both
     assert len(live_capturer.active_flows) == 1
     assert len(pcap_flows) == 1
     key = list(pcap_flows.keys())[0]

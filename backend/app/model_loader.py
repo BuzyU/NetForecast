@@ -27,7 +27,6 @@ from .config import (
 logger = logging.getLogger(__name__)
 
 
-# ── WorldModel architecture — multi-layer LSTM with dropout ───────────
 class WorldModel(nn.Module):
     def __init__(self, n_features: int = N_FEATURES, hidden: int = HIDDEN_SIZE,
                  n_stages: int = N_STAGES, num_layers: int = NUM_LSTM_LAYERS,
@@ -51,7 +50,7 @@ class WorldModel(nn.Module):
 
     def forward(self, x: torch.Tensor):
         out, (h_n, _) = self.lstm(x)
-        h = h_n[-1]  # last layer's hidden state
+        h = h_n[-1]
         next_state = self.next_state_head(h)
         infiltration_logit = self.infiltration_head(h).squeeze(-1)
         stage_logits = self.stage_head(h)
@@ -93,7 +92,6 @@ class ModelArtifacts:
         self.model_version: str = "1.0.0"
         self.model_hash: str | None = None
         self.scaler_hash: str | None = None
-        # Cache scaler mean for SHAP background
         self._scaler_mean: np.ndarray | None = None
 
     @property
@@ -104,7 +102,6 @@ class ModelArtifacts:
         """Load all artifacts. Raises on any failure — never returns a half-loaded state."""
         logger.info("Loading model artifacts...")
 
-        # ── config.json ───────────────────────────────────────────────
         if not CONFIG_PATH.exists():
             raise FileNotFoundError(f"config.json not found at {CONFIG_PATH}")
         with open(CONFIG_PATH) as f:
@@ -132,7 +129,6 @@ class ModelArtifacts:
         logger.info("  config.json: OK (%d features, %d stages, window=%d)",
                      len(cfg_features), len(cfg_stages), cfg_window)
 
-        # ── scaler.pkl ────────────────────────────────────────────────
         if not SCALER_PATH.exists():
             raise FileNotFoundError(f"scaler.pkl not found at {SCALER_PATH}")
         with open(SCALER_PATH, "rb") as f:
@@ -149,11 +145,9 @@ class ModelArtifacts:
                     f"scaler.pkl fitted on {self.scaler.n_features_in_} features, "
                     f"expected {N_FEATURES}"
                 )
-        # Cache scaler mean as SHAP background sample (scaled space → zeros)
         self._scaler_mean = np.zeros((1, N_FEATURES), dtype=np.float32)
         logger.info("  scaler.pkl: OK (n_features=%d)", N_FEATURES)
 
-        # ── world_model.pt ────────────────────────────────────────────
         if not MODEL_PATH.exists():
             raise FileNotFoundError(f"world_model.pt not found at {MODEL_PATH}")
 
@@ -169,7 +163,6 @@ class ModelArtifacts:
         self.model.to(self.device)
         self.model.eval()
 
-        # ── Shape validation: run a dummy forward pass ────────────────
         dummy = torch.randn(1, WINDOW_SIZE, N_FEATURES, device=self.device)
         with torch.no_grad():
             next_state, inf_logit, stage_logits = self.model(dummy)
@@ -181,7 +174,6 @@ class ModelArtifacts:
         assert stage_logits.shape == (1, N_STAGES), \
             f"stage head shape {stage_logits.shape}, expected (1, {N_STAGES})"
 
-        # ── Provenance & integrity: compute content hashes ────────────
         def _hash_file(p):
             h = hashlib.sha256()
             with open(p, "rb") as fp:
@@ -211,5 +203,4 @@ class ModelArtifacts:
         return self._scaler_mean
 
 
-# ── Singleton ─────────────────────────────────────────────────────────
 artifacts = ModelArtifacts()

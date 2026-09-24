@@ -44,11 +44,6 @@ export default function ForecastView({ session, onBack, featureList }) {
           setError('No flow records captured for this session yet.');
           return;
         }
-        // Need a full real 6-flow window before forecasting — previously this
-        // padded short sessions by duplicating the earliest flow, which
-        // produces a forecast partly built on fake repeated observations.
-        // Showing an honest "collecting baseline" state instead is more
-        // trustworthy than a forecast that looks confident but isn't.
         if (allFlows.length < WINDOW_SIZE) {
           return;
         }
@@ -71,9 +66,6 @@ export default function ForecastView({ session, onBack, featureList }) {
     return () => { active = false; };
   }, [sessionKey, featOrder]);
 
-  // Estimated wall-clock time per forecast step, from this session's own
-  // observed flow cadence — not a made-up constant. Falls back to null
-  // (ETA hidden) if timestamps aren't usable.
   const avgStepMs = useMemo(() => {
     if (!flows || flows.length < 2) return null;
     const times = flows.map(f => new Date(f.timestamp).getTime()).filter(t => !Number.isNaN(t));
@@ -102,18 +94,14 @@ export default function ForecastView({ session, onBack, featureList }) {
     );
   }
 
-  // Only show full empty-state loader on initial fetch when no forecast exists yet
   if (loading && !forecast) {
     return <div className="empty-state"><div className="loading-spinner"/><p>Running forecast model...</p></div>;
   }
 
-  // Only show full empty-state error if there is no forecast to display
   if (error && !forecast) {
     return <div className="empty-state"><AlertTriangle size={28} color="var(--severity-high)"/><p>{error}</p></div>;
   }
 
-  // Honest "collecting baseline" state instead of forecasting on a padded/
-  // duplicated window (see the fetch effect above).
   if (!loading && !forecast && flows.length < WINDOW_SIZE) {
     return (
       <div className="empty-state">
@@ -141,16 +129,6 @@ export default function ForecastView({ session, onBack, featureList }) {
     ? Math.max(...explanation.attributions.map(a => Math.abs(a.importance)))
     : 1;
 
-  // Only worth a full forecast dashboard when there's an actual attack
-  // signal. Checks, in order: the forecast already triggered an alert; any
-  // step's predicted stage is non-Benign; the forecast's own probability
-  // trajectory climbs meaningfully at any step (not just the final/current
-  // one — a climbing-but-not-yet-alerting trend is exactly what a forecaster
-  // should surface); the current window's explanation probability; or the
-  // session has genuine historical risk (max_stage_reached / latest_risk_score
-  // from the Dashboard) even if it has since quieted down — an analyst must
-  // still be able to reach the flow-log audit trail for a session that was
-  // actually compromised, not just ones that are compromised right now.
   const hasAttackSignal = Boolean(
     forecast?.alert_triggered ||
     chartData.some(d => d.stage && d.stage !== 'Benign') ||
@@ -175,7 +153,6 @@ export default function ForecastView({ session, onBack, featureList }) {
 
   return (
     <>
-      {/* Session header + back button */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', marginBottom: 'var(--sp-3)', flexWrap: 'wrap' }}>
         <button className="btn btn-sm" onClick={onBack}>&larr; BACK</button>
         <span className="mono text-sm" style={{ color: 'var(--text-secondary)' }}>
@@ -219,7 +196,6 @@ export default function ForecastView({ session, onBack, featureList }) {
         </div>
       </div>
 
-      {/* Kill Chain — full width hero */}
       <div className="panel mb-4">
         <div className="panel-header">
           <span className="panel-title">KILL_CHAIN_PROGRESS</span>
@@ -230,7 +206,6 @@ export default function ForecastView({ session, onBack, featureList }) {
         </div>
       </div>
 
-      {/* Forecast chart + SHAP side by side */}
       <div className="forecast-grid">
         <div className="panel">
           <div className="panel-header">
@@ -276,7 +251,6 @@ export default function ForecastView({ session, onBack, featureList }) {
               </AreaChart>
             </ResponsiveContainer>
 
-            {/* Stage track below chart */}
             <div className="stage-track">
               {chartData.map((d, i) => (
                 <div key={i} className="stage-track-item" style={{ background: stageColor(d.stage) + '18', color: stageColor(d.stage) }}>
@@ -287,7 +261,6 @@ export default function ForecastView({ session, onBack, featureList }) {
           </div>
         </div>
 
-        {/* SHAP panel */}
         <div className="panel">
           <div className="panel-header">
             <span className="panel-title">FEATURE_ATTRIBUTION</span>
@@ -330,7 +303,6 @@ export default function ForecastView({ session, onBack, featureList }) {
         </div>
       </div>
 
-      {/* ── Flow Logs Table ── */}
       <div className="panel">
         <div className="panel-header">
           <span className="panel-title">NETWORK_LOGS</span>

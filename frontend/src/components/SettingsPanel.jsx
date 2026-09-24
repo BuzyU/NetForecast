@@ -11,7 +11,6 @@ export default function SettingsPanel({
 }) {
   return (
     <div className="settings-grid">
-      {/* ── Mode Control Card (Full width top) ── */}
       <div className="panel" style={{
         gridColumn: '1 / -1',
         border: systemMode === 'live' ? '1px solid #27ae60' : '1px solid #e67e22',

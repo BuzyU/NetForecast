@@ -20,7 +20,6 @@ import sys
 import time
 from datetime import datetime, timezone
 
-# Prevent Windows cp1252 console encoding crashes
 if sys.platform == "win32":
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -31,10 +30,6 @@ if sys.platform == "win32":
 import numpy as np
 import requests
 
-# ── CIC-IDS flow feature profiles per MITRE stage ────────────────────
-# These are based on the statistical distributions observed in CIC-IDS2017/2018
-# and the synthetic generation logic from pipeline_fixed.py.
-# Each profile defines (mean, std) for the 22 features at that attack stage.
 
 FLOW_FEATURES = [
     "flow_duration", "tot_fwd_pkts", "tot_bwd_pkts", "fwd_pkt_len_mean",
@@ -45,7 +40,6 @@ FLOW_FEATURES = [
     "tcp_win_size", "retransmit_cnt",
 ]
 
-# Realistic IP pools for sessions
 SRC_IPS = [
     "10.0.1.5", "10.0.1.12", "10.0.1.23", "10.0.1.45", "10.0.1.78",
     "192.168.1.100", "192.168.1.150", "172.16.0.10", "172.16.0.25",
@@ -55,8 +49,6 @@ DST_IPS = [
     "203.0.113.50", "198.51.100.10", "192.0.2.1",
 ]
 
-# Attack stage profiles: (mean_shift, std) per feature relative to benign baseline
-# These encode the same domain knowledge as pipeline_fixed.py's synthetic generator
 STAGE_PROFILES = {
     "Benign": {
         "flow_duration": (50000, 30000),
@@ -83,32 +75,32 @@ STAGE_PROFILES = {
         "retransmit_cnt": (1, 1),
     },
     "Reconnaissance": {
-        "flow_duration": (1000, 500),          # Short probing flows
-        "tot_fwd_pkts": (3, 2),                # Few packets per probe
+        "flow_duration": (1000, 500),
+        "tot_fwd_pkts": (3, 2),
         "tot_bwd_pkts": (1, 1),
-        "fwd_pkt_len_mean": (60, 20),          # Small SYN packets
+        "fwd_pkt_len_mean": (60, 20),
         "bwd_pkt_len_mean": (40, 15),
         "flow_bytes_s": (2000, 1500),
-        "flow_pkts_s": (80, 40),               # HIGH packet rate (scanning)
-        "flow_iat_mean": (1000, 800),           # Fast succession
+        "flow_pkts_s": (80, 40),
+        "flow_iat_mean": (1000, 800),
         "flow_iat_std": (500, 400),
         "fwd_iat_mean": (800, 600),
         "bwd_iat_mean": (1200, 900),
-        "syn_flag_cnt": (8, 3),                 # HIGH SYN (port scanning)
+        "syn_flag_cnt": (8, 3),
         "ack_flag_cnt": (1, 1),
         "fin_flag_cnt": (0, 0.3),
-        "rst_flag_cnt": (5, 3),                 # RST from closed ports
+        "rst_flag_cnt": (5, 3),
         "psh_flag_cnt": (0, 0.2),
         "urg_flag_cnt": (0, 0.1),
         "down_up_ratio": (0.3, 0.2),
         "pkt_size_avg": (60, 20),
-        "ttl_variance": (5, 3),                 # TTL varies across scans
+        "ttl_variance": (5, 3),
         "tcp_win_size": (1024, 500),
         "retransmit_cnt": (0, 0.5),
     },
     "Initial Access": {
         "flow_duration": (30000, 20000),
-        "tot_fwd_pkts": (50, 30),              # Many attempts
+        "tot_fwd_pkts": (50, 30),
         "tot_bwd_pkts": (20, 15),
         "fwd_pkt_len_mean": (300, 200),
         "bwd_pkt_len_mean": (100, 80),
@@ -122,17 +114,17 @@ STAGE_PROFILES = {
         "ack_flag_cnt": (15, 10),
         "fin_flag_cnt": (1, 1),
         "rst_flag_cnt": (2, 2),
-        "psh_flag_cnt": (8, 4),                 # HIGH PSH (payload delivery)
+        "psh_flag_cnt": (8, 4),
         "urg_flag_cnt": (0, 0.2),
         "down_up_ratio": (2.5, 1.5),
         "pkt_size_avg": (350, 200),
         "ttl_variance": (3, 2),
         "tcp_win_size": (32768, 15000),
-        "retransmit_cnt": (5, 3),               # HIGH retransmits (exploit attempts)
+        "retransmit_cnt": (5, 3),
     },
     "Lateral Movement": {
         "flow_duration": (120000, 80000),
-        "tot_fwd_pkts": (30, 20),              # HIGH fwd (spreading)
+        "tot_fwd_pkts": (30, 20),
         "tot_bwd_pkts": (25, 15),
         "fwd_pkt_len_mean": (500, 300),
         "bwd_pkt_len_mean": (400, 250),
@@ -148,26 +140,26 @@ STAGE_PROFILES = {
         "rst_flag_cnt": (1, 1),
         "psh_flag_cnt": (5, 3),
         "urg_flag_cnt": (0, 0.1),
-        "down_up_ratio": (3.0, 1.5),           # HIGH down/up (credential reuse)
+        "down_up_ratio": (3.0, 1.5),
         "pkt_size_avg": (450, 250),
         "ttl_variance": (4, 2),
         "tcp_win_size": (49152, 15000),
         "retransmit_cnt": (2, 2),
     },
     "C2": {
-        "flow_duration": (300000, 200000),      # Long-lived beaconing
+        "flow_duration": (300000, 200000),
         "tot_fwd_pkts": (8, 5),
         "tot_bwd_pkts": (6, 4),
         "fwd_pkt_len_mean": (150, 100),
         "bwd_pkt_len_mean": (200, 150),
-        "flow_bytes_s": (1000, 800),            # Low bandwidth
-        "flow_pkts_s": (5, 3),                  # Low rate
-        "flow_iat_mean": (120000, 80000),       # Regular intervals
-        "flow_iat_std": (5000, 3000),           # HIGH regularity (beaconing!)
+        "flow_bytes_s": (1000, 800),
+        "flow_pkts_s": (5, 3),
+        "flow_iat_mean": (120000, 80000),
+        "flow_iat_std": (5000, 3000),
         "fwd_iat_mean": (100000, 70000),
         "bwd_iat_mean": (130000, 90000),
         "syn_flag_cnt": (1, 0.5),
-        "ack_flag_cnt": (12, 6),                # HIGH ACK (keepalive)
+        "ack_flag_cnt": (12, 6),
         "fin_flag_cnt": (0, 0.3),
         "rst_flag_cnt": (0, 0.2),
         "psh_flag_cnt": (3, 2),
@@ -183,8 +175,8 @@ STAGE_PROFILES = {
         "tot_fwd_pkts": (5, 3),
         "tot_bwd_pkts": (3, 2),
         "fwd_pkt_len_mean": (100, 80),
-        "bwd_pkt_len_mean": (1200, 400),        # HIGH outbound payload
-        "flow_bytes_s": (50000, 30000),          # HIGH bandwidth (data theft)
+        "bwd_pkt_len_mean": (1200, 400),
+        "flow_bytes_s": (50000, 30000),
         "flow_pkts_s": (10, 5),
         "flow_iat_mean": (30000, 20000),
         "flow_iat_std": (15000, 10000),
@@ -196,7 +188,7 @@ STAGE_PROFILES = {
         "rst_flag_cnt": (0, 0.3),
         "psh_flag_cnt": (6, 3),
         "urg_flag_cnt": (1, 0.5),
-        "down_up_ratio": (0.2, 0.1),            # LOW ratio (more data leaving)
+        "down_up_ratio": (0.2, 0.1),
         "pkt_size_avg": (1100, 400),
         "ttl_variance": (2, 1),
         "tcp_win_size": (65535, 10000),
@@ -211,7 +203,7 @@ def generate_flow(stage: str) -> dict:
     flow = {}
     for feat in FLOW_FEATURES:
         mean, std = profile[feat]
-        value = max(0, np.random.normal(mean, std))  # Non-negative
+        value = max(0, np.random.normal(mean, std))
         flow[feat] = round(float(value), 4)
     return flow
 
@@ -229,13 +221,11 @@ def run_attack_scenario(api_url: str, speed: float, session_count: int):
     print(f"  Speed: {speed}s between flows")
     print(f"{'='*60}\n")
 
-    # Define session scenarios
     sessions = []
     for i in range(session_count):
         src = random.choice(SRC_IPS)
         dst = random.choice(DST_IPS)
         if i < session_count // 2:
-            # Attack session — full kill chain
             stages = (
                 ["Benign"] * random.randint(3, 6) +
                 ["Reconnaissance"] * random.randint(3, 5) +
@@ -245,7 +235,6 @@ def run_attack_scenario(api_url: str, speed: float, session_count: int):
                 ["Exfiltration"] * random.randint(2, 3)
             )
         else:
-            # Benign session — normal traffic
             stages = ["Benign"] * random.randint(15, 30)
 
         sessions.append({
@@ -271,7 +260,7 @@ def run_attack_scenario(api_url: str, speed: float, session_count: int):
                 flow["src_ip"] = session["src_ip"]
                 flow["dst_ip"] = session["dst_ip"]
                 flow["timestamp"] = datetime.now(timezone.utc).isoformat()
-                flow["source"] = "simulated"  # §7 provenance tag
+                flow["source"] = "simulated"
 
                 try:
                     resp = requests.post(
@@ -342,7 +331,6 @@ def main():
     )
     args = parser.parse_args()
 
-    # Verify backend is reachable
     try:
         resp = requests.get(f"{args.api}/health", timeout=5)
         health = resp.json()

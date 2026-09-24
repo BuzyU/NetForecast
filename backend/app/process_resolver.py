@@ -10,12 +10,10 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Cache: port -> { "pid": int, "process_name": str, "app_name": str, "app_icon": str, "cached_at": float }
 _PORT_CACHE: dict[int, dict] = {}
 _LAST_SCAN_TIME: float = 0.0
 _SCAN_INTERVAL_SECONDS: float = 1.5
 
-# Friendly executable to app name mapping
 APP_MAPPINGS = {
     "antigravity.exe": ("Antigravity IDE", "code"),
     "code.exe": ("VS Code", "code"),
@@ -42,7 +40,6 @@ APP_MAPPINGS = {
     "steam.exe": ("Steam Client", "activity"),
 }
 
-# Known well-known port fallbacks when process cannot be queried (e.g. without admin rights)
 PORT_FALLBACKS = {
     8000: ("NetForecast API", "python.exe", "cpu"),
     5173: ("NetForecast UI", "node.exe", "zap"),
@@ -68,11 +65,9 @@ def _refresh_socket_table():
 
     try:
         import psutil
-        # Get active internet connections (both TCP and UDP)
         connections = psutil.net_connections(kind="inet")
         pids = {c.pid for c in connections if c.pid}
 
-        # Cache process names for PIDs
         proc_names = {}
         for pid in pids:
             try:
@@ -137,7 +132,6 @@ def resolve_process(port: Optional[int], protocol: Optional[str] = "TCP") -> dic
     if port in _PORT_CACHE:
         return _PORT_CACHE[port]
 
-    # Fallback to known port definitions
     if port in PORT_FALLBACKS:
         app_name, proc_name, icon = PORT_FALLBACKS[port]
         return {
