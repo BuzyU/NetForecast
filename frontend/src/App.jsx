@@ -313,6 +313,7 @@ export default function App() {
             featureList={featureList}
             systemMode={systemMode}
             liveFlows={attackFlows}
+            wsConnected={wsConnected}
           />
         )}
         {view === 'forecast' && <ForecastView session={selectedSession} onBack={() => setView('dashboard')} featureList={featureList}/>}

@@ -444,14 +444,24 @@ async def ingest_single_flow(
             "flow_bytes_s": getattr(flow, "flow_bytes_s", 0.0),
             "flow_pkts_s": getattr(flow, "flow_pkts_s", 0.0),
             "flow_count": session.flow_count,
+            # The heartbleed signature path fires on the very first flow, before
+            # the 6-flow ML window is full (result_data["prediction"] is still
+            # None at that point) -- it must take priority here, or the "fires
+            # an immediate critical alert" signature detector becomes invisible
+            # to every consumer of this broadcast (frontend included).
             "infiltration_prob": (
-                result_data["prediction"]["infiltration_probability"]
+                result_data["heartbleed_alert"]["infiltration_prob"]
+                if result_data["heartbleed_alert"]
+                else result_data["prediction"]["infiltration_probability"]
                 if result_data["prediction"] else None
             ),
             "predicted_stage": (
-                result_data["prediction"]["predicted_stage"]
+                result_data["heartbleed_alert"]["predicted_stage"]
+                if result_data["heartbleed_alert"]
+                else result_data["prediction"]["predicted_stage"]
                 if result_data["prediction"] else None
             ),
+            "is_alert": bool(result_data["alert"] or result_data["heartbleed_alert"]),
             "max_stage_reached": session.max_stage_reached,
             "alert": result_data["alert"],
             "heartbleed_alert": result_data["heartbleed_alert"],

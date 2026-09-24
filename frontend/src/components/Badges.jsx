@@ -244,10 +244,10 @@ export function WellbeingModal({ isOpen, onClose }) {
                     <tr key={c.cycle_id}>
                       <td className="mono" style={{ fontWeight: 600 }}>{c.cycle_id}</td>
                       <td>{formatTime(c.started_at)}</td>
-                      <td>{c.ended_at ? formatTime(c.ended_at) : 'CURRENT'}</td>
-                      <td>{c.session_count || c.total_sessions || 0}</td>
-                      <td>{c.flow_count || c.total_flows || 0}</td>
-                      <td><span className={`severity-badge ${(c.alert_count || 0) > 0 ? 'critical' : 'low'}`}>{c.alert_count || 0}</span></td>
+                      <td>{c.archived_at ? formatTime(c.archived_at) : 'CURRENT'}</td>
+                      <td>{c.stats?.total_sessions ?? 0}</td>
+                      <td>{c.stats?.total_flows ?? 0}</td>
+                      <td><span className={`severity-badge ${(c.stats?.total_alerts ?? 0) > 0 ? 'critical' : 'low'}`}>{c.stats?.total_alerts ?? 0}</span></td>
                     </tr>
                   ))}
                 </tbody>

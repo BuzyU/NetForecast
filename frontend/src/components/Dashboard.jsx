@@ -3,7 +3,7 @@ import { FlaskConical } from 'lucide-react';
 import { apiFetch } from '../api';
 import SessionTable from './SessionTable';
 
-export default function Dashboard({ onSelectSession, systemMode, liveFlows = [] }) {
+export default function Dashboard({ onSelectSession, systemMode, liveFlows = [], wsConnected = false }) {
   const [sessions, setSessions] = useState([]);
   const [stats, setStats] = useState({});
   const [alertStats, setAlertStats] = useState({});
@@ -30,6 +30,8 @@ export default function Dashboard({ onSelectSession, systemMode, liveFlows = [] 
       setLoading(false);
     }).catch(() => setLoading(false));
   }, [sortBy, systemMode]);
+
+  const activeAtRisk = sessions.filter(s => (s.latest_risk_score || 0) > 0.5).length;
 
   useEffect(() => {
     refresh();
@@ -60,7 +62,7 @@ export default function Dashboard({ onSelectSession, systemMode, liveFlows = [] 
       {/* Stats cards */}
       <div className="stats-bar">
         <div className="stat-card">
-          <div className="stat-card-label">TOTAL_SESSIONS</div>
+          <div className="stat-card-label">TOTAL_SESSIONS (CYCLE)</div>
           <div className="stat-card-value">{stats.total_sessions || 0}</div>
         </div>
         <div className="stat-card">
@@ -68,9 +70,14 @@ export default function Dashboard({ onSelectSession, systemMode, liveFlows = [] 
           <div className="stat-card-value">{stats.total_flows || 0}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-card-label">AT_RISK</div>
-          <div className="stat-card-value" style={{ color: (stats.at_risk_sessions || 0) > 0 ? 'var(--severity-critical)' : undefined }}>
-            {stats.at_risk_sessions || 0}
+          {/* Computed from the same time-filtered `sessions` list the table below
+              renders, not the backend's unfiltered all-cycle stat -- otherwise this
+              card can show a count with no matching rows visible anywhere (a session
+              that was at-risk then went idle drops out of the active table but not
+              out of the unfiltered backend count). */}
+          <div className="stat-card-label">AT_RISK (ACTIVE)</div>
+          <div className="stat-card-value" style={{ color: activeAtRisk > 0 ? 'var(--severity-critical)' : undefined }}>
+            {activeAtRisk}
           </div>
         </div>
         <div className="stat-card">
@@ -111,7 +118,7 @@ export default function Dashboard({ onSelectSession, systemMode, liveFlows = [] 
               className={`tab-btn ${dashboardTab === 'live_flows' ? 'active' : ''}`}
               onClick={() => setDashboardTab('live_flows')}
             >
-              REAL-TIME FLOWS ({liveFlows.length})
+              ACTIVE ATTACKS ({liveFlows.length})
             </button>
           </div>
         </div>
@@ -150,6 +157,7 @@ export default function Dashboard({ onSelectSession, systemMode, liveFlows = [] 
         setSortBy={setSortBy}
         dashboardTab={dashboardTab}
         liveFlows={liveFlows}
+        wsConnected={wsConnected}
       />
     </>
   );

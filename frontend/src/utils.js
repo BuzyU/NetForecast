@@ -49,15 +49,17 @@ export const STAGE_TECHNIQUE = {
 };
 
 // ── Attack detection ────────────────────────────────────────────
-// A flow counts as an active attack when the model's infiltration
-// probability crosses the alert threshold (0.5, matching the backend
-// default) OR the predicted stage is non-Benign. Either check alone can
-// miss edge cases (e.g. a non-Benign stage prediction just under the
-// probability threshold), so both are checked.
+// Prefer the backend's own `is_alert` verdict when present -- it accounts
+// for the adaptive EMA+sigma threshold (which moves away from 0.5) and the
+// Heartbleed signature path, so it's authoritative in a way a hardcoded
+// 0.5 client-side check can never be. Fall back to the probability/stage
+// heuristic only for payloads that don't carry is_alert (e.g. session rows
+// from /sessions, which report latest_risk_score/latest_stage instead).
 export function isAttackFlow(flow) {
   if (!flow) return false;
-  const prob = flow.infiltration_prob ?? flow.infiltration_probability ?? 0;
-  const stage = flow.predicted_stage;
+  if (typeof flow.is_alert === 'boolean') return flow.is_alert;
+  const prob = flow.infiltration_prob ?? flow.infiltration_probability ?? flow.latest_risk_score ?? 0;
+  const stage = flow.predicted_stage ?? flow.latest_stage;
   return prob > 0.5 || (!!stage && stage !== 'Benign');
 }
 

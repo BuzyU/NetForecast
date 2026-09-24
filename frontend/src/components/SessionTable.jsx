@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { Database, ShieldCheck } from 'lucide-react';
+import { Database, Radio, ShieldCheck } from 'lucide-react';
 import {
   DirBadge, IdentityBadge, AppBadge, PacketStat,
   CompromiseIndicator, KillChainCompact,
@@ -14,15 +14,26 @@ function SessionTable({
   setSortBy,
   dashboardTab = 'sessions',
   liveFlows = [],
+  wsConnected = false,
 }) {
   if (dashboardTab === 'live_flows') {
     return (
       <div className="data-table-wrap">
         {liveFlows.length === 0 ? (
           <div className="empty-state">
-            <ShieldCheck size={28} color="var(--severity-low)"/>
-            <p>Monitoring — no active threats</p>
-            <span className="mono text-xs text-muted">Only flagged attacks appear here. Traffic is flowing normally.</span>
+            {wsConnected ? (
+              <>
+                <ShieldCheck size={28} color="var(--severity-low)"/>
+                <p>Monitoring — no active threats</p>
+                <span className="mono text-xs text-muted">Only flagged attacks appear here. Traffic is flowing normally.</span>
+              </>
+            ) : (
+              <>
+                <Radio size={28} color="var(--text-muted)"/>
+                <p>Waiting for connection...</p>
+                <span className="mono text-xs text-muted">The real-time feed is currently disconnected.</span>
+              </>
+            )}
           </div>
         ) : (
           <table className="data-table">

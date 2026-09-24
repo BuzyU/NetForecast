@@ -45,10 +45,13 @@ from pipeline_fixed import (  # noqa: E402
     FlowSeqDataset,
     FocalLoss,
     WorldModel,
-    build_sequences,
     compute_metrics,
     three_way_split,
 )
+# build_sequences is intentionally NOT imported from pipeline_fixed here: this
+# file defines its own copy inside main() (with an empty-input guard the
+# production version doesn't need). Importing the same name would just be
+# shadowed by that local def and mislead a reader into thinking it's shared.
 
 RAW_DIR = Path("data/raw_cicids")
 SEED = 42
@@ -281,8 +284,7 @@ def main():
     # short single-family sessions still yield windows where possible.
     X_hold, yn_hold, ym_hold, ys_hold, fam_hold = [], [], [], [], []
     for fam, g in holdout_df.groupby("family_label"):
-        g = g.sort_values(["session_id", "timestamp"]).reset_index(drop=True)
-        Xh, ynh, ymh, ysh = build_sequences(g, window=WINDOW)
+        Xh, ynh, ymh, ysh = sort_and_seq(g)
         X_hold.append(Xh); yn_hold.append(ynh); ym_hold.append(ymh); ys_hold.append(ysh)
         fam_hold.extend([fam] * len(Xh))
     X_hold = np.concatenate(X_hold) if X_hold else np.zeros((0, WINDOW, len(FLOW_FEATURES)), dtype=np.float32)

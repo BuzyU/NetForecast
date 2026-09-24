@@ -114,7 +114,7 @@ export default function ForecastView({ session, onBack, featureList }) {
 
   // Honest "collecting baseline" state instead of forecasting on a padded/
   // duplicated window (see the fetch effect above).
-  if (!loading && !forecast && flows.length > 0 && flows.length < WINDOW_SIZE) {
+  if (!loading && !forecast && flows.length < WINDOW_SIZE) {
     return (
       <div className="empty-state">
         <Loader2 size={28} color="var(--text-muted)" className="spin-icon"/>
@@ -142,13 +142,22 @@ export default function ForecastView({ session, onBack, featureList }) {
     : 1;
 
   // Only worth a full forecast dashboard when there's an actual attack
-  // signal — either the model already projects escalation, or the current
-  // window already shows risk. A flat all-Benign trajectory isn't useful
-  // to visualize in detail.
+  // signal. Checks, in order: the forecast already triggered an alert; any
+  // step's predicted stage is non-Benign; the forecast's own probability
+  // trajectory climbs meaningfully at any step (not just the final/current
+  // one — a climbing-but-not-yet-alerting trend is exactly what a forecaster
+  // should surface); the current window's explanation probability; or the
+  // session has genuine historical risk (max_stage_reached / latest_risk_score
+  // from the Dashboard) even if it has since quieted down — an analyst must
+  // still be able to reach the flow-log audit trail for a session that was
+  // actually compromised, not just ones that are compromised right now.
   const hasAttackSignal = Boolean(
     forecast?.alert_triggered ||
     chartData.some(d => d.stage && d.stage !== 'Benign') ||
-    (explanation?.infiltration_probability ?? 0) > 0.1
+    chartData.some(d => (d.mean ?? 0) > 0.1) ||
+    (explanation?.infiltration_probability ?? 0) > 0.1 ||
+    (session.max_stage_reached && session.max_stage_reached !== 'Benign') ||
+    (session.latest_risk_score ?? 0) > 0.1
   );
 
   if (forecast && !hasAttackSignal) {
@@ -157,7 +166,7 @@ export default function ForecastView({ session, onBack, featureList }) {
         <ShieldCheck size={28} color="var(--severity-low)"/>
         <p style={{ color: 'var(--severity-low)' }}>No attack activity projected</p>
         <span className="mono text-xs text-muted">
-          {session.src_ip} &rarr; {session.dst_ip} — the model forecasts this session staying Benign across all {chartData.length} steps. Nothing to visualize.
+          {session.src_ip} &rarr; {session.dst_ip} — the model forecasts this session staying Benign across all {chartData.length} steps, and it has no prior risk on record. Nothing to visualize.
         </span>
         <button className="btn btn-sm" onClick={onBack} style={{ marginTop: 'var(--sp-3)' }}>&larr; BACK TO DASHBOARD</button>
       </div>
